@@ -91,7 +91,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     logger.info(f"Messaggio ricevuto: {user_text[:100]}...")
-    memory.add_message("user", user_text)
 
     # Se ci sono domande pending, la risposta va al Question Engine
     if has_pending_questions():
@@ -100,43 +99,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("\u2705 Risposta ricevuta! Procedo...")
             return
 
-    # Pre-routing basato su keyword (bypass LLM per comandi espliciti)
-    intent = _keyword_route(user_text)
-
-    if intent:
-        confidence = 0.95
-        details = "keyword match"
-        logger.info(f"Keyword route: {intent}")
-    else:
-        # Classifica intent con LLM solo se nessun keyword match
-        await update.message.reply_text("\U0001f9e0 Analizzo la richiesta...")
-
-        try:
-            intent_result = await classify_intent(user_text)
-        except Exception as e:
-            logger.error(f"Errore classificazione intent: {e}")
-            await update.message.reply_text(
-                f"\u26a0\ufe0f Errore nel routing: {str(e)[:200]}\n"
-                "Riprova tra qualche secondo."
-            )
-            return
-
-        intent = intent_result.get("intent", "general_question")
-        confidence = intent_result.get("confidence", 0)
-        details = intent_result.get("details", "")
-
-    logger.info(f"Intent: {intent} (confidence: {confidence}) — {details}")
-
-    # Routing ai Task Orchestrator
-    response = await _route_to_orchestrator(
-        intent=intent,
-        user_text=user_text,
-        confidence=confidence,
-        bot=context.bot,
-    )
-
-    memory.add_message("assistant", response)
-    await update.message.reply_text(response, parse_mode=None)
+    await _process_text(user_text, update, context)
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -171,9 +134,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Mostra trascrizione
         await update.message.reply_text(f"\U0001f4dd Trascrizione:\n\u00ab{text}\u00bb")
 
-        # Processa come messaggio di testo normale
-        update.message.text = text
-        await handle_message(update, context)
+        # Processa il testo trascritto (routing diretto, no mutazione Message)
+        await _process_text(text, update, context)
 
     except Exception as e:
         logger.error(f"Errore trascrizione vocale: {e}")
@@ -203,6 +165,50 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("task_postpone:"):
         task_id = data.split(":", 1)[1]
         await query.edit_message_text(f"\u23f0 Task {task_id} posticipata a domani")
+
+
+# ─── Core Processing ─────────────────────────────────────
+
+async def _process_text(user_text: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Classifica intent e smista al Task Orchestrator. Usato da testo e vocali."""
+    memory.add_message("user", user_text)
+
+    # Pre-routing basato su keyword (bypass LLM per comandi espliciti)
+    intent = _keyword_route(user_text)
+
+    if intent:
+        confidence = 0.95
+        details = "keyword match"
+        logger.info(f"Keyword route: {intent}")
+    else:
+        # Classifica intent con LLM solo se nessun keyword match
+        await update.message.reply_text("\U0001f9e0 Analizzo la richiesta...")
+
+        try:
+            intent_result = await classify_intent(user_text)
+        except Exception as e:
+            logger.error(f"Errore classificazione intent: {e}")
+            await update.message.reply_text(
+                f"\u26a0\ufe0f Errore nel routing: {str(e)[:200]}\n"
+                "Riprova tra qualche secondo."
+            )
+            return
+
+        intent = intent_result.get("intent", "general_question")
+        confidence = intent_result.get("confidence", 0)
+        details = intent_result.get("details", "")
+
+    logger.info(f"Intent: {intent} (confidence: {confidence}) — {details}")
+
+    response = await _route_to_orchestrator(
+        intent=intent,
+        user_text=user_text,
+        confidence=confidence,
+        bot=context.bot,
+    )
+
+    memory.add_message("assistant", response)
+    await update.message.reply_text(response, parse_mode=None)
 
 
 # ─── Routing ─────────────────────────────────────────────
