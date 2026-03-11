@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: hermes-os
+    runtime: docker
+    repo: https://github.com/GiovanniM-maker/hermes-os
+    branch: main
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: TELEGRAM_MASTER_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: GOOGLE_DRIVE_CREDENTIALS
+        sync: false
+      - key: HERMES_DRIVE_FOLDER_ID
+        sync: false
+      - key: N8N_BASE_URL
+        sync: false
+      - key: N8N_API_KEY
+        sync: false
