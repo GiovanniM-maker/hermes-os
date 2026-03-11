@@ -17,9 +17,97 @@ from telegram.ext import (
 
 import config
 from core.llm_router import chat, TaskComplexity
+from core.transcriber import transcribe_voice
 from core import memory
 
 logger = logging.getLogger("hermes.channel_bots")
+
+
+# ─── Voice handler generico per channel bots ─────────────
+
+def _make_voice_handler(message_handler):
+    """Crea un voice handler che trascrive e poi chiama il message handler del bot."""
+    async def _voice(update: Update, context):
+        if not update.message:
+            return
+        if str(update.message.chat_id) != config.TELEGRAM_CHAT_ID:
+            await update.message.reply_text("\u26d4 Non autorizzato.")
+            return
+
+        await update.message.reply_text("\U0001f3a4 Trascrivo il vocale...")
+
+        try:
+            voice = update.message.voice or update.message.audio
+            if not voice:
+                await update.message.reply_text("\u26a0\ufe0f Nessun audio trovato.")
+                return
+
+            tg_file = await context.bot.get_file(voice.file_id)
+            audio_bytes = await tg_file.download_as_bytearray()
+            text = await transcribe_voice(bytes(audio_bytes))
+
+            if not text:
+                await update.message.reply_text("\u26a0\ufe0f Non sono riuscito a trascrivere il vocale.")
+                return
+
+            await update.message.reply_text(f"\U0001f4dd Trascrizione:\n\u00ab{text}\u00bb")
+
+            # Chiama direttamente l'orchestrator del bot, bypassando il message handler
+            # che controlla update.message.text (qui è None perché è un vocale)
+            from telegram.ext import ContextTypes
+            # Simuliamo la logica del message handler senza dipendere da .text
+            await _process_voice_text(text, update, context, message_handler)
+
+        except Exception as e:
+            logger.error(f"Errore trascrizione vocale (channel): {e}")
+            await update.message.reply_text(f"\u26a0\ufe0f Errore trascrizione: {str(e)[:200]}")
+
+    return _voice
+
+
+async def _process_voice_text(text: str, update: Update, context, message_handler_name: str):
+    """Processa testo da vocale per il channel bot corretto."""
+    bot = context.bot
+
+    if message_handler_name == "pipeline":
+        from agents.pipeline_forge.orchestrator import handle_request
+        memory.add_message("user", f"[PipelineForge] {text}")
+        await update.message.reply_text("\u2699\ufe0f Analizzo la richiesta pipeline...")
+        try:
+            response = await handle_request(text, bot)
+        except Exception as e:
+            response = f"\u26a0\ufe0f Errore PipelineForge: {str(e)[:300]}"
+
+    elif message_handler_name == "mail":
+        from agents.mail_mind.orchestrator import handle_request
+        memory.add_message("user", f"[MailMind] {text}")
+        try:
+            response = await handle_request(text, bot)
+        except Exception as e:
+            response = f"\u26a0\ufe0f Errore MailMind: {str(e)[:300]}"
+
+    elif message_handler_name == "tasks":
+        from agents.task_bot.orchestrator import handle_request
+        memory.add_message("user", f"[TaskBot] {text}")
+        try:
+            response = await handle_request(text, bot)
+        except Exception as e:
+            response = f"\u26a0\ufe0f Errore TaskBot: {str(e)[:300]}"
+
+    elif message_handler_name == "build":
+        from agents.code_forge.orchestrator import handle_request
+        memory.add_message("user", f"[CodeForge] {text}")
+        await update.message.reply_text("\U0001f4bb Genero il codice...")
+        try:
+            response = await handle_request(text, bot)
+        except Exception as e:
+            response = f"\u26a0\ufe0f Errore CodeForge: {str(e)[:300]}"
+
+    else:
+        response = "\u26a0\ufe0f Bot non riconosciuto."
+
+    memory.add_message("assistant", response)
+    await update.message.reply_text(response, parse_mode=None)
 
 
 # ─── Pipeline Bot ─────────────────────────────────────────
@@ -202,9 +290,10 @@ def build_channel_bot(name: str) -> Application | None:
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", cfg["start"]))
     app.add_handler(CommandHandler("help", cfg["start"]))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, _make_voice_handler(name)))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, cfg["message"]))
 
-    logger.info(f"Channel bot '{name}' creato")
+    logger.info(f"Channel bot '{name}' creato (con voice)")
     return app
 
 
