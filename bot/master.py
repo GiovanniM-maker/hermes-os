@@ -14,6 +14,7 @@ from telegram.ext import ContextTypes
 import config
 from core.llm_router import classify_intent, chat, TaskComplexity
 from core.question_engine import receive_answer, has_pending_questions
+from core.transcriber import transcribe_voice
 from core import memory
 from core import knowledge_base as kb
 
@@ -103,12 +104,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler per messaggi vocali — trascrizione + routing."""
-    await update.message.reply_text(
-        "\U0001f3a4 Trascrizione vocale non ancora attiva.\n"
-        "Per ora scrivi il messaggio testualmente.\n"
-        "(Whisper API verr\u00e0 integrato nella prossima fase)"
-    )
+    """Handler per messaggi vocali — trascrizione via Groq Whisper + routing."""
+    if not update.message:
+        return
+
+    chat_id = str(update.message.chat_id)
+    if chat_id != config.TELEGRAM_CHAT_ID:
+        await update.message.reply_text("\u26d4 Non sei autorizzato.")
+        return
+
+    await update.message.reply_text("\U0001f3a4 Trascrivo il vocale...")
+
+    try:
+        # Scarica il file audio da Telegram
+        voice = update.message.voice or update.message.audio
+        if not voice:
+            await update.message.reply_text("\u26a0\ufe0f Nessun audio trovato.")
+            return
+
+        tg_file = await context.bot.get_file(voice.file_id)
+        audio_bytes = await tg_file.download_as_bytearray()
+
+        # Trascrivi con Groq Whisper
+        text = await transcribe_voice(bytes(audio_bytes))
+
+        if not text:
+            await update.message.reply_text("\u26a0\ufe0f Non sono riuscito a trascrivere il vocale.")
+            return
+
+        # Mostra trascrizione
+        await update.message.reply_text(f"\U0001f4dd Trascrizione:\n\u00ab{text}\u00bb")
+
+        # Processa come messaggio di testo normale
+        update.message.text = text
+        await handle_message(update, context)
+
+    except Exception as e:
+        logger.error(f"Errore trascrizione vocale: {e}")
+        await update.message.reply_text(f"\u26a0\ufe0f Errore trascrizione: {str(e)[:200]}")
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -157,10 +190,12 @@ async def _route_to_orchestrator(
         )
 
     elif intent == "mail_task":
-        return (
-            "\U0001f4e7 MailMind \u2014 Coming Soon\n"
-            "Il modulo gestione email sar\u00e0 attivato dopo il setup Gmail OAuth."
-        )
+        from agents.mail_mind.orchestrator import handle_request as mail_handle
+        try:
+            return await mail_handle(user_text, bot)
+        except Exception as e:
+            logger.error(f"MailMind error: {e}")
+            return f"\u26a0\ufe0f Errore MailMind: {str(e)[:300]}"
 
     elif intent == "task_mgmt":
         return await _handle_task_request(user_text, bot)

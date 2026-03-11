@@ -54,8 +54,10 @@ GMAIL_CLIENT_ID = os.environ.get("GMAIL_CLIENT_ID", "")
 GMAIL_CLIENT_SECRET = os.environ.get("GMAIL_CLIENT_SECRET", "")
 GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "")
 
-# ─── OpenAI / Whisper (trascrizione audio) ───────────────
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+# ─── Groq / Whisper (trascrizione audio) ─────────────────
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+WHISPER_MODEL = "whisper-large-v3"
 
 # ─── Google Ads (AdsWatch — fase futura) ─────────────────
 GOOGLE_ADS_DEVELOPER_TOKEN = os.environ.get("GOOGLE_ADS_DEVELOPER_TOKEN", "")
