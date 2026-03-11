@@ -21,6 +21,34 @@ from core import knowledge_base as kb
 logger = logging.getLogger("hermes.master")
 
 
+# ─── Keyword Pre-Router ───────────────────────────────────
+
+_KEYWORD_ROUTES: list[tuple[list[str], str]] = [
+    (["mailmind", "configura mail", "setup mail", "email setup", "digest email"],
+     "mail_task"),
+    (["pipeline", "workflow n8n", "crea workflow", "automazione", "pipelineforge"],
+     "pipeline_request"),
+    (["aggiungi task", "fatto ", "task ", "tasks", "brief mattutino", "taskbot"],
+     "task_mgmt"),
+    (["genera codice", "landing page", "codeforge", "scrivi codice"],
+     "code_request"),
+    (["/status", "stato sistema", "system status"],
+     "system_command"),
+    (["ads ", "campagna", "adswatch", "meta ads", "google ads"],
+     "ads_question"),
+]
+
+
+def _keyword_route(text: str) -> str | None:
+    """Routing rapido basato su keyword. Ritorna intent o None."""
+    lower = text.lower().strip()
+    for keywords, intent in _KEYWORD_ROUTES:
+        for kw in keywords:
+            if kw in lower:
+                return intent
+    return None
+
+
 # ─── Handlers ────────────────────────────────────────────
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -72,22 +100,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("\u2705 Risposta ricevuta! Procedo...")
             return
 
-    # Classifica intent
-    await update.message.reply_text("\U0001f9e0 Analizzo la richiesta...")
+    # Pre-routing basato su keyword (bypass LLM per comandi espliciti)
+    intent = _keyword_route(user_text)
 
-    try:
-        intent_result = await classify_intent(user_text)
-    except Exception as e:
-        logger.error(f"Errore classificazione intent: {e}")
-        await update.message.reply_text(
-            f"\u26a0\ufe0f Errore nel routing: {str(e)[:200]}\n"
-            "Riprova tra qualche secondo."
-        )
-        return
+    if intent:
+        confidence = 0.95
+        details = "keyword match"
+        logger.info(f"Keyword route: {intent}")
+    else:
+        # Classifica intent con LLM solo se nessun keyword match
+        await update.message.reply_text("\U0001f9e0 Analizzo la richiesta...")
 
-    intent = intent_result.get("intent", "general_question")
-    confidence = intent_result.get("confidence", 0)
-    details = intent_result.get("details", "")
+        try:
+            intent_result = await classify_intent(user_text)
+        except Exception as e:
+            logger.error(f"Errore classificazione intent: {e}")
+            await update.message.reply_text(
+                f"\u26a0\ufe0f Errore nel routing: {str(e)[:200]}\n"
+                "Riprova tra qualche secondo."
+            )
+            return
+
+        intent = intent_result.get("intent", "general_question")
+        confidence = intent_result.get("confidence", 0)
+        details = intent_result.get("details", "")
 
     logger.info(f"Intent: {intent} (confidence: {confidence}) — {details}")
 
