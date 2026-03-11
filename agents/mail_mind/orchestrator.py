@@ -101,31 +101,11 @@ def _is_meta_query(text_lower: str) -> bool:
 
 async def _handle_meta(user_text: str) -> str:
     """Rispondi a domande informative su MailMind."""
+    from core.identity import get_meta_system_prompt
+
     return await chat(
         messages=[
-            {"role": "system", "content": (
-                "Sei MailMind, il bot di HERMES OS che gestisce le email di Juan. "
-                "L'utente ti sta facendo una domanda informativa (non un comando email). "
-                "Rispondi in italiano, breve e chiaro. Spiega cosa fai e come usarti.\n\n"
-                "Le tue capacita':\n"
-                "- Controllo email non lette e creo un digest interattivo classificato "
-                "(urgente/da rispondere/da leggere/task/archivio)\n"
-                "- Estraggo task automaticamente dalle email e le mando a TaskBot\n"
-                "- Cerco mittenti nella Knowledge Base per darti contesto\n"
-                "- Genero bozze di risposta AI con il tono giusto\n"
-                "- Invio risposte email direttamente\n"
-                "- Archivio email in batch\n"
-                "- Digest automatico ogni mattina alle 09:00\n"
-                "- Conversazione libera sulle email\n\n"
-                "Comandi principali:\n"
-                "- 'controlla email' / 'digest' — fetch e analisi email\n"
-                "- 'rispondi 2 con: testo' — rispondi a email #2\n"
-                "- 'bozza 3' — genera bozza AI per email #3\n"
-                "- 'ok 1,4-8' — conferma azioni proposte\n"
-                "- 'archivia 1,3,7' o 'archivia tutto'\n"
-                "- 'chi e' Marco Rossi' — cerca nella KB\n"
-                "- 'configura mailmind' — setup workflow n8n"
-            )},
+            {"role": "system", "content": get_meta_system_prompt("MailMind")},
             {"role": "user", "content": user_text},
         ],
         complexity=TaskComplexity.LIGHT,

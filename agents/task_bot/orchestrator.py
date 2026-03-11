@@ -18,6 +18,21 @@ from core.question_engine import ask_questions
 
 logger = logging.getLogger("hermes.taskbot")
 
+# ─── Meta Keywords ────────────────────────────────────────
+_META_KEYWORDS = (
+    "cosa fai", "chi sei", "come funzioni", "help", "aiuto",
+    "cosa puoi fare", "che sai fare", "presentati", "info",
+    "cosa sai", "come ti uso", "istruzioni",
+    "potresti", "puoi fare", "sei capace", "sai fare",
+    "riesci a", "funzionalità", "capacità",
+)
+
+# Verbi che indicano una richiesta concreta di task (NON meta)
+_TASK_ACTION_VERBS = (
+    "aggiungi", "fatto", "sposta", "completa", "crea task",
+    "task:", "brief", "briefing",
+)
+
 # Task in-memory (in futuro: persistenza su Drive/Sheets)
 _tasks: list[dict] = []
 _task_counter: int = 0
@@ -26,6 +41,10 @@ _task_counter: int = 0
 async def handle_request(user_text: str, bot: Bot | None = None) -> str:
     """Entry point TaskBot. Gestisce comandi task."""
     text_lower = user_text.lower().strip()
+
+    # ─── Pre-check: domande informative/meta ──────────────
+    if _is_meta_query(text_lower):
+        return await _handle_meta(user_text)
 
     # Parsing comandi
     if text_lower.startswith("aggiungi task:") or text_lower.startswith("aggiungi task "):
@@ -61,6 +80,36 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
     else:
         # Usa LLM per capire cosa vuole
         return await _smart_task_handling(user_text, bot=bot)
+
+
+# ─── Meta / Info Queries ──────────────────────────────────
+
+def _is_meta_query(text_lower: str) -> bool:
+    """Rileva domande informative/meta su TaskBot."""
+    # Se contiene verbi d'azione task, NON e' meta
+    if any(v in text_lower for v in _TASK_ACTION_VERBS):
+        return False
+
+    if any(kw in text_lower for kw in _META_KEYWORDS):
+        return True
+    if len(text_lower) < 15 and "?" in text_lower:
+        return True
+    return False
+
+
+async def _handle_meta(user_text: str) -> str:
+    """Rispondi a domande informative su TaskBot."""
+    from core.identity import get_meta_system_prompt
+
+    return await chat(
+        messages=[
+            {"role": "system", "content": get_meta_system_prompt("TaskBot")},
+            {"role": "user", "content": user_text},
+        ],
+        complexity=TaskComplexity.LIGHT,
+        temperature=0.5,
+        max_tokens=512,
+    )
 
 
 async def _add_task(description: str, client: str | None = None) -> str:

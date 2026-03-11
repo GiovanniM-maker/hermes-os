@@ -83,21 +83,11 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
 
 async def _handle_meta(user_text: str) -> str:
     """Rispondi a domande informative su CodeForge."""
+    from core.identity import get_meta_system_prompt
+
     return await chat(
         messages=[
-            {"role": "system", "content": (
-                "Sei CodeForge, il bot di HERMES OS che genera codice. "
-                "L'utente ti sta facendo una domanda informativa (non una richiesta di codice). "
-                "Rispondi in italiano, breve e chiaro. Spiega cosa fai e come usarti.\n\n"
-                "Le tue capacita':\n"
-                "- Genero codice in Python, JavaScript/TypeScript, HTML/CSS, React, shell scripts\n"
-                "- Creo: script, landing page, componenti React, API, bot, automazioni\n"
-                "- Il flusso: analizzo la richiesta -> genero il codice -> review qualita' -> "
-                "correggo eventuali problemi -> consegno\n"
-                "- Se mi mancano info, chiedo chiarimenti prima di procedere\n\n"
-                "Esempio d'uso: 'Scrivi uno script Python che scrape i prezzi da Amazon' "
-                "oppure 'Crea una landing page per un corso di AI'"
-            )},
+            {"role": "system", "content": get_meta_system_prompt("CodeForge")},
             {"role": "user", "content": user_text},
         ],
         complexity=TaskComplexity.LIGHT,

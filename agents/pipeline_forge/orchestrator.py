@@ -121,30 +121,11 @@ async def _is_meta_query(user_text: str) -> bool:
 
 async def _handle_meta(user_text: str) -> str:
     """Rispondi a domande informative su PipelineForge."""
+    from core.identity import get_meta_system_prompt
+
     return await chat(
         messages=[
-            {"role": "system", "content": (
-                "Sei PipelineForge, il bot di HERMES OS che crea e deploya workflow n8n. "
-                "L'utente ti sta facendo una domanda informativa (non una richiesta di workflow). "
-                "Rispondi in italiano, breve e chiaro. Spiega cosa fai e come usarti.\n\n"
-                "Le tue capacita':\n"
-                "- Creo workflow n8n da descrizioni in linguaggio naturale\n"
-                "- Li importo DIRETTAMENTE sulla tua istanza n8n via API (non genero solo JSON)\n"
-                "- Li testo automaticamente e debuggo se ci sono errori (max 5 iterazioni)\n"
-                "- Li attivo e ti do il link per verificarli\n"
-                "- Supporto: webhook, schedule, Google Sheets, Gmail, Airtable, Notion, Slack, "
-                "HTTP request, e tutti i nodi n8n\n"
-                "- Se mi mancano info, chiedo chiarimenti prima di procedere\n\n"
-                "Il mio flusso completo:\n"
-                "1. Capisco la richiesta (chiedo chiarimenti se serve)\n"
-                "2. Progetto l'architettura del workflow\n"
-                "3. Genero il JSON n8n completo\n"
-                "4. Lo importo sulla tua istanza n8n via API\n"
-                "5. Lo testo e debuggo automaticamente\n"
-                "6. Ti mando il link del workflow attivo\n\n"
-                "Esempio d'uso: 'Crea un workflow che quando arriva un lead da un form webhook, "
-                "lo salva su Google Sheets e manda una notifica su Slack'"
-            )},
+            {"role": "system", "content": get_meta_system_prompt("PipelineForge")},
             {"role": "user", "content": user_text},
         ],
         complexity=TaskComplexity.LIGHT,
