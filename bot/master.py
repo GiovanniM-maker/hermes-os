@@ -17,6 +17,7 @@ from core.question_engine import receive_answer, has_pending_questions
 from core.transcriber import transcribe_voice
 from core import memory
 from core import knowledge_base as kb
+from bot.telegram_utils import send_long_message
 
 logger = logging.getLogger("hermes.master")
 
@@ -208,7 +209,7 @@ async def _process_text(user_text: str, update: Update, context: ContextTypes.DE
     )
 
     memory.add_message("assistant", response)
-    await update.message.reply_text(response, parse_mode=None)
+    await send_long_message(update, response)
 
 
 # ─── Routing ─────────────────────────────────────────────

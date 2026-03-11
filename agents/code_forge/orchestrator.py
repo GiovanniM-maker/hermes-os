@@ -68,19 +68,13 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
         outcome=f"Generato {lang} — {len(code)} chars",
     )
 
-    # Tronca se troppo lungo per Telegram (max ~4096 chars)
-    if len(code) > 3500:
-        code_display = code[:3500] + "\n\n# ... (troncato, file completo disponibile)"
-    else:
-        code_display = code
-
     return (
         f"\U0001f4bb CodeForge \u2014 Codice Generato\n"
         f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
         f"\U0001f4c4 File: {filename}\n"
         f"\U0001f3f7\ufe0f Linguaggio: {lang}\n"
         f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
-        f"```{lang}\n{code_display}\n```\n\n"
+        f"```{lang}\n{code}\n```\n\n"
         f"{explanation}"
     )
 

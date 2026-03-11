@@ -20,6 +20,7 @@ from core.llm_router import chat, TaskComplexity
 from core.transcriber import transcribe_voice
 from core.question_engine import receive_answer, has_pending_questions
 from core import memory
+from bot.telegram_utils import send_long_message
 
 logger = logging.getLogger("hermes.channel_bots")
 
@@ -108,7 +109,7 @@ async def _process_voice_text(text: str, update: Update, context, message_handle
         response = "\u26a0\ufe0f Bot non riconosciuto."
 
     memory.add_message("assistant", response)
-    await update.message.reply_text(response, parse_mode=None)
+    await send_long_message(update, response)
 
 
 # ─── Pipeline Bot ─────────────────────────────────────────
@@ -150,7 +151,7 @@ async def _pipeline_message(update: Update, context):
         response = f"\u26a0\ufe0f Errore PipelineForge: {str(e)[:300]}"
 
     memory.add_message("assistant", response)
-    await update.message.reply_text(response, parse_mode=None)
+    await send_long_message(update, response)
 
 
 # ─── Mail Bot ─────────────────────────────────────────────
@@ -191,7 +192,7 @@ async def _mail_message(update: Update, context):
         response = f"\u26a0\ufe0f Errore MailMind: {str(e)[:300]}"
 
     memory.add_message("assistant", response)
-    await update.message.reply_text(response, parse_mode=None)
+    await send_long_message(update, response)
 
 
 # ─── Tasks Bot ────────────────────────────────────────────
@@ -232,7 +233,7 @@ async def _tasks_message(update: Update, context):
         response = f"\u26a0\ufe0f Errore TaskBot: {str(e)[:300]}"
 
     memory.add_message("assistant", response)
-    await update.message.reply_text(response, parse_mode=None)
+    await send_long_message(update, response)
 
 
 # ─── Build Bot (CodeForge) ────────────────────────────────
@@ -273,7 +274,7 @@ async def _build_message(update: Update, context):
         response = f"\u26a0\ufe0f Errore CodeForge: {str(e)[:300]}"
 
     memory.add_message("assistant", response)
-    await update.message.reply_text(response, parse_mode=None)
+    await send_long_message(update, response)
 
 
 # ─── Bot Builders ─────────────────────────────────────────

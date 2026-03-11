@@ -139,7 +139,7 @@ Max 3 domande, solo quelle STRETTAMENTE necessarie."""
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_text},
         ],
-        complexity=TaskComplexity.HEAVY,
+        complexity=TaskComplexity.MEDIUM,
         temperature=0.2,
         max_tokens=1024,
         json_mode=True,
@@ -202,7 +202,7 @@ Rispondi in formato strutturato testuale. Sii preciso sui tipi di nodo n8n."""
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Specifica workflow:\n{spec}"},
         ],
-        complexity=TaskComplexity.HEAVY,
+        complexity=TaskComplexity.MEDIUM,
         temperature=0.2,
         max_tokens=2048,
     )
