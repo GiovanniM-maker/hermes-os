@@ -113,3 +113,40 @@ async def activate_workflow(workflow_id: str, active: bool = True) -> dict:
         )
         response.raise_for_status()
         return response.json()
+
+
+async def call_webhook(webhook_path: str, payload: dict | None = None) -> dict | list:
+    """
+    Chiama un webhook n8n (production mode).
+    Il path è relativo: es. 'hermes-mail-fetch'
+    URL finale: {N8N_BASE_URL}/webhook/{path}
+    """
+    url = f"{_base_url()}/webhook/{webhook_path}"
+    logger.info(f"Calling n8n webhook: {url}")
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(
+            url,
+            json=payload or {},
+            headers={"Content-Type": "application/json"},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def call_webhook_test(webhook_path: str, payload: dict | None = None) -> dict | list:
+    """
+    Chiama un webhook n8n in test mode.
+    URL: {N8N_BASE_URL}/webhook-test/{path}
+    """
+    url = f"{_base_url()}/webhook-test/{webhook_path}"
+    logger.info(f"Calling n8n webhook (test): {url}")
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(
+            url,
+            json=payload or {},
+            headers={"Content-Type": "application/json"},
+        )
+        response.raise_for_status()
+        return response.json()

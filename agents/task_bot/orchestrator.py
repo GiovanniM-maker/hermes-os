@@ -257,6 +257,28 @@ async def _smart_task_handling(user_text: str) -> str:
 
 # ─── Task da fonti esterne (usato da MailMind, ecc.) ─────
 
+# ─── Scheduled Brief (chiamato da APScheduler) ──────────
+
+async def scheduled_morning_brief():
+    """Chiamato ogni mattina alle 08:30 da APScheduler."""
+    from telegram import Bot as TgBot
+
+    if not config.TELEGRAM_TASKS_TOKEN and not config.TELEGRAM_MASTER_TOKEN:
+        logger.warning("TaskBot scheduled: nessun token bot configurato")
+        return
+
+    # Usa il tasks bot se disponibile, altrimenti master
+    token = config.TELEGRAM_TASKS_TOKEN or config.TELEGRAM_MASTER_TOKEN
+    bot = TgBot(token=token)
+
+    try:
+        brief = await _morning_brief()
+        await bot.send_message(chat_id=config.TELEGRAM_CHAT_ID, text=brief)
+        logger.info("TaskBot: brief mattutino inviato")
+    except Exception as e:
+        logger.error(f"TaskBot scheduled brief error: {e}")
+
+
 async def add_external_task(
     description: str,
     source: str,

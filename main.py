@@ -60,15 +60,22 @@ def build_master_app() -> Application | None:
 
 def setup_scheduled_jobs():
     """Configure recurring jobs."""
+    from agents.task_bot.orchestrator import scheduled_morning_brief
+    from agents.mail_mind.orchestrator import scheduled_morning_digest
+
     # TaskBot — Brief mattutino ore 08:30
-    # scheduler.add_job(task_bot_morning_brief, "cron", hour=8, minute=30,
-    #     id="taskbot_morning", replace_existing=True)
+    scheduler.add_job(
+        scheduled_morning_brief, "cron", hour=8, minute=30,
+        id="taskbot_morning", replace_existing=True,
+    )
+    logger.info("Scheduled: TaskBot brief mattutino @ 08:30")
 
-    # MailMind — Digest serale ore 19:00
-    # scheduler.add_job(mailmind_evening_digest, "cron", hour=19, minute=0,
-    #     id="mailmind_digest", replace_existing=True)
-
-    logger.info("Scheduled jobs configurati (attualmente commentati)")
+    # MailMind — Digest mattutino ore 09:00
+    scheduler.add_job(
+        scheduled_morning_digest, "cron", hour=9, minute=0,
+        id="mailmind_digest", replace_existing=True,
+    )
+    logger.info("Scheduled: MailMind digest @ 09:00")
 
 
 # ─── FastAPI Lifespan ────────────────────────────────────

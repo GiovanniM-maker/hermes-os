@@ -1,21 +1,21 @@
 """
 HERMES OS — MailMind Orchestrator
-Gestione email via n8n webhooks.
+Gestione email autonoma via n8n webhooks + analisi LLM.
 
-Architettura:
-- n8n gestisce Gmail internamente (auth, lettura, invio)
-- HERMES chiama webhook n8n per triggerare azioni
-- n8n manda risultati a HERMES via webhook di ritorno
+Sub-Agents: Reader → EntityResolver → Classifier → TaskExtractor → Drafter → Cleaner
 
-Workflow n8n necessari:
-1. mail_fetch: legge email non lette → ritorna lista
-2. mail_send: invia email (to, subject, body)
-3. mail_archive: archivia email per ID
-4. mail_delete: elimina email per ID
+Flusso:
+1. Reader fetcha email non lette via n8n webhook
+2. Classifier categorizza con LLM (urgente/task/da leggere/da rispondere/archivio)
+3. EntityResolver cerca mittenti nella KB
+4. TaskExtractor estrae task → le manda a TaskBot
+5. Presenta digest interattivo a Juan
+6. Juan conferma/risponde conversando
 """
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 from telegram import Bot
@@ -23,52 +23,529 @@ from telegram import Bot
 import config
 from core.llm_router import chat, TaskComplexity
 from core import memory
-from agents.pipeline_forge.n8n_client import import_workflow
+from core import knowledge_base as kb
+from agents.pipeline_forge.n8n_client import import_workflow, call_webhook
 
 logger = logging.getLogger("hermes.mailmind")
 
-# Webhook URLs di n8n (impostati dopo la creazione dei workflow)
-_n8n_webhooks: dict[str, str] = {}
+# ─── State ────────────────────────────────────────────────
+# Ultimo digest in memoria per interazione conversazionale
+_last_digest: list[dict] = []
+_digest_timestamp: str = ""
 
+
+# ─── Entry Point ──────────────────────────────────────────
 
 async def handle_request(user_text: str, bot: Bot | None = None) -> str:
-    """Entry point MailMind."""
+    """Entry point MailMind — gestisce comandi e conversazione."""
     text_lower = user_text.lower().strip()
 
-    # "configura/setup" PRIMA del check generico "mail" (mailmind contiene "mail")
+    # Setup n8n workflows
     if "setup" in text_lower or "configura" in text_lower:
         return await setup_n8n_workflows()
 
-    elif any(w in text_lower for w in ("elimina", "cancella", "delete")):
-        return await _handle_delete(user_text)
+    # Azioni batch su digest (es: "ok 1,2,4-8", "elimina 1,3", "archivia tutto")
+    if _last_digest and _looks_like_action(text_lower):
+        return await _execute_actions(user_text, bot)
 
-    elif any(w in text_lower for w in ("archivia", "archive")):
-        return await _handle_archive(user_text)
-
-    elif any(w in text_lower for w in ("rispondi", "reply", "rispondi con")):
+    # Rispondi a email specifica (es: "rispondi 2 con: grazie per la proposta")
+    if re.match(r"rispondi\s+\d+", text_lower):
         return await _handle_reply(user_text)
 
-    elif any(w in text_lower for w in ("bozza", "draft")):
+    # Genera bozza (es: "bozza 3")
+    if re.match(r"bozz[ae]\s+\d+", text_lower):
         return await _handle_draft(user_text)
 
-    elif any(w in text_lower for w in ("chi è", "chi e'", "who is")):
+    # Chi è (es: "chi è Marco Rossi")
+    if any(w in text_lower for w in ("chi è", "chi e'", "who is")):
         return await _handle_who_is(user_text)
 
-    elif any(w in text_lower for w in ("digest", "email", "mail", "posta")):
-        return await _generate_digest(bot)
+    # Fetch email / digest (trigger manuale)
+    if any(w in text_lower for w in ("digest", "email", "mail", "posta", "controlla")):
+        return await run_email_analysis(bot)
 
+    # Conversazione libera sulle email
+    return await _conversational_mail(user_text)
+
+
+# ─── Core: Analisi Email Autonoma ─────────────────────────
+
+async def run_email_analysis(bot: Bot | None = None) -> str:
+    """
+    Flusso completo di analisi email.
+    Chiamato dal digest schedulato (09:00) o su richiesta.
+    """
+    global _last_digest, _digest_timestamp
+
+    # ─── Step 1: Reader — fetch email da n8n ──────────
+    try:
+        raw_emails = await _fetch_emails()
+    except Exception as e:
+        logger.error(f"Reader: errore fetch email: {e}")
+        return (
+            "\U0001f4e7 MailMind \u2014 Errore Fetch\n"
+            "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+            f"\u26a0\ufe0f Non riesco a leggere le email: {str(e)[:200]}\n\n"
+            "Verifica che:\n"
+            "1. I workflow n8n siano attivi\n"
+            "2. Le credenziali Gmail siano collegate\n"
+            "Scrivi 'configura mailmind' per ricreare i workflow."
+        )
+
+    if not raw_emails:
+        return (
+            "\U0001f4e7 MailMind \u2014 Inbox Pulita\n"
+            "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+            "\u2705 Nessuna email non letta. Tutto sotto controllo!"
+        )
+
+    # ─── Step 2: Classifier — categorizza con LLM ────
+    classified = await _classify_emails(raw_emails)
+
+    # ─── Step 3: EntityResolver — cerca mittenti KB ───
+    classified = await _resolve_entities(classified)
+
+    # ─── Step 4: TaskExtractor — estrai task ──────────
+    tasks_extracted = await _extract_tasks(classified)
+
+    # Salva digest in memoria per interazione successiva
+    _last_digest = classified
+    _digest_timestamp = datetime.now(timezone.utc).isoformat()
+
+    # ─── Step 5: Formatta digest ──────────────────────
+    return _format_digest(classified, tasks_extracted)
+
+
+# ─── Sub-Agent: Reader ────────────────────────────────────
+
+async def _fetch_emails() -> list[dict]:
+    """Fetcha email non lette via n8n webhook."""
+    result = await call_webhook("hermes-mail-fetch", {})
+
+    # n8n ritorna lista di email o singolo oggetto
+    if isinstance(result, dict):
+        result = [result]
+
+    emails = []
+    for i, raw in enumerate(result):
+        emails.append({
+            "index": i + 1,
+            "id": raw.get("id", raw.get("messageId", "")),
+            "from": raw.get("from", raw.get("sender", "")),
+            "subject": raw.get("subject", "(nessun oggetto)"),
+            "snippet": raw.get("snippet", raw.get("textPlain", ""))[:300],
+            "date": raw.get("date", raw.get("internalDate", "")),
+            "labels": raw.get("labelIds", []),
+        })
+
+    logger.info(f"Reader: {len(emails)} email fetchate")
+    return emails
+
+
+# ─── Sub-Agent: Classifier ────────────────────────────────
+
+async def _classify_emails(emails: list[dict]) -> list[dict]:
+    """Classifica email con LLM: urgente/task/da_leggere/da_rispondere/archivio."""
+
+    # Prepara sommario email per LLM
+    email_summary = "\n".join(
+        f"{e['index']}. Da: {e['from']} | Oggetto: {e['subject']} | Snippet: {e['snippet'][:100]}"
+        for e in emails
+    )
+
+    system_prompt = """Sei il Classifier di MailMind (HERMES OS). Classifica ogni email.
+
+Categorie:
+- "urgente": richiede azione immediata (cliente, deadline, problema)
+- "da_rispondere": serve una risposta ma non urgente
+- "da_leggere": informativa, vale la pena leggere
+- "task": contiene un'azione da fare (manda a TaskBot)
+- "archivio": newsletter, notifiche, promo — da archiviare
+
+Per ogni email dai anche:
+- "azione_proposta": cosa faresti (es: "rispondo con conferma", "archivio", "creo task")
+- "priorita": 1 (alta) a 5 (bassa)
+
+Rispondi in JSON: [{"index": 1, "categoria": "...", "azione_proposta": "...", "priorita": N}, ...]"""
+
+    response = await chat(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": email_summary},
+        ],
+        complexity=TaskComplexity.LIGHT,
+        temperature=0.1,
+        max_tokens=2048,
+        json_mode=True,
+    )
+
+    try:
+        classifications = json.loads(response)
+    except json.JSONDecodeError:
+        # Fallback: tutto come "da_leggere"
+        classifications = [{"index": e["index"], "categoria": "da_leggere",
+                           "azione_proposta": "da verificare", "priorita": 3} for e in emails]
+
+    # Merge classificazione con dati email
+    class_map = {c["index"]: c for c in classifications}
+    for email in emails:
+        c = class_map.get(email["index"], {})
+        email["categoria"] = c.get("categoria", "da_leggere")
+        email["azione_proposta"] = c.get("azione_proposta", "")
+        email["priorita"] = c.get("priorita", 3)
+
+    # Ordina per priorità
+    emails.sort(key=lambda x: x["priorita"])
+
+    logger.info(f"Classifier: {len(emails)} email classificate")
+    return emails
+
+
+# ─── Sub-Agent: EntityResolver ────────────────────────────
+
+async def _resolve_entities(emails: list[dict]) -> list[dict]:
+    """Cerca mittenti nella KB. Marca quelli sconosciuti."""
+    for email in emails:
+        sender = email.get("from", "")
+        # Estrai nome dal formato "Nome <email@example.com>"
+        name = sender.split("<")[0].strip().strip('"') if "<" in sender else sender.split("@")[0]
+
+        if name:
+            kb_info = await kb.search_entity(name)
+            if kb_info:
+                email["sender_info"] = kb_info
+                email["sender_known"] = True
+            else:
+                email["sender_info"] = None
+                email["sender_known"] = False
+
+    unknown = [e for e in emails if not e.get("sender_known", True)]
+    if unknown:
+        logger.info(f"EntityResolver: {len(unknown)} mittenti sconosciuti")
+
+    return emails
+
+
+# ─── Sub-Agent: TaskExtractor ─────────────────────────────
+
+async def _extract_tasks(emails: list[dict]) -> list[str]:
+    """Estrae task dalle email categorizzate come 'task' e le manda a TaskBot."""
+    from agents.task_bot.orchestrator import add_external_task
+
+    task_emails = [e for e in emails if e.get("categoria") == "task"]
+    if not task_emails:
+        return []
+
+    tasks_created = []
+    for email in task_emails:
+        # Usa LLM per estrarre la task concreta
+        response = await chat(
+            messages=[
+                {"role": "system", "content": (
+                    "Estrai la task concreta da questa email. "
+                    "Rispondi con UNA frase che descrive l'azione da fare. "
+                    "Includi il nome del mittente/cliente se rilevante."
+                )},
+                {"role": "user", "content": (
+                    f"Da: {email['from']}\n"
+                    f"Oggetto: {email['subject']}\n"
+                    f"Contenuto: {email['snippet']}"
+                )},
+            ],
+            complexity=TaskComplexity.LIGHT,
+            temperature=0.1,
+            max_tokens=128,
+        )
+
+        task_desc = response.strip()
+        task_id = await add_external_task(
+            description=task_desc,
+            source="MailMind",
+            priority="normal",
+        )
+        tasks_created.append(f"  #{task_id}: {task_desc}")
+        logger.info(f"TaskExtractor: task #{task_id} creata da email #{email['index']}")
+
+    return tasks_created
+
+
+# ─── Digest Formatter ─────────────────────────────────────
+
+def _format_digest(emails: list[dict], tasks_extracted: list[str]) -> str:
+    """Formatta il digest interattivo."""
+    lines = [
+        f"\U0001f4e7 MailMind \u2014 {len(emails)} email non lette",
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501",
+    ]
+
+    # Raggruppa per categoria
+    urgenti = [e for e in emails if e["categoria"] == "urgente"]
+    da_rispondere = [e for e in emails if e["categoria"] == "da_rispondere"]
+    da_leggere = [e for e in emails if e["categoria"] == "da_leggere"]
+    task_mails = [e for e in emails if e["categoria"] == "task"]
+    archivio = [e for e in emails if e["categoria"] == "archivio"]
+
+    if urgenti:
+        lines.append("\n\U0001f534 URGENTE")
+        for e in urgenti:
+            known = "\U0001f464" if e.get("sender_known") else "\u2753"
+            lines.append(f"  {e['index']}. {known} {e['from'][:40]}")
+            lines.append(f"     \u00ab{e['subject']}\u00bb")
+            lines.append(f"     \u2192 {e['azione_proposta']}")
+
+    if da_rispondere:
+        lines.append("\n\U0001f7e1 DA RISPONDERE")
+        for e in da_rispondere:
+            known = "\U0001f464" if e.get("sender_known") else "\u2753"
+            lines.append(f"  {e['index']}. {known} {e['from'][:40]}")
+            lines.append(f"     \u00ab{e['subject']}\u00bb")
+            lines.append(f"     \u2192 {e['azione_proposta']}")
+
+    if da_leggere:
+        lines.append("\n\U0001f535 DA LEGGERE")
+        for e in da_leggere:
+            lines.append(f"  {e['index']}. {e['from'][:40]} \u2014 \u00ab{e['subject']}\u00bb")
+
+    if task_mails:
+        lines.append("\n\U0001f4cb TASK ESTRATTE \u2192 TaskBot")
+        for t in tasks_extracted:
+            lines.append(t)
+
+    if archivio:
+        nums = ", ".join(str(e["index"]) for e in archivio)
+        lines.append(f"\n\U0001f5d1\ufe0f ARCHIVIO ({len(archivio)} email): #{nums}")
+        lines.append("  \u2192 Proposta: archivio tutto")
+
+    # Mittenti sconosciuti
+    unknown = [e for e in emails if not e.get("sender_known", True)
+               and e["categoria"] in ("urgente", "da_rispondere")]
+    if unknown:
+        lines.append("\n\u2753 MITTENTI SCONOSCIUTI")
+        for e in unknown:
+            lines.append(f"  {e['index']}. {e['from'][:50]} \u2014 chi \u00e8?")
+
+    lines.append("\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501")
+    lines.append("Rispondi con:")
+    lines.append("  'ok 1,4-8' \u2014 conferma azioni proposte")
+    lines.append("  'archivia 1,3,7' \u2014 archivia")
+    lines.append("  'rispondi 2 con: ...' \u2014 rispondi")
+    lines.append("  'bozza 3' \u2014 genera bozza AI")
+    lines.append("  oppure parlami delle email liberamente")
+
+    return "\n".join(lines)
+
+
+# ─── Azioni su Digest ─────────────────────────────────────
+
+def _looks_like_action(text: str) -> bool:
+    """Rileva se il messaggio è un'azione sul digest."""
+    return bool(re.match(
+        r"^(ok|archivia|elimina|cancella|conferma|si|sì)\s",
+        text
+    )) or text in ("archivia tutto", "ok", "si", "sì")
+
+
+def _parse_numbers(text: str) -> list[int]:
+    """Parsa numeri e range (es: '1,3,4-8' → [1,3,4,5,6,7,8])."""
+    numbers = []
+    # Rimuovi parole, tieni solo numeri e range
+    clean = re.sub(r"[^0-9,\-]", " ", text)
+    parts = re.findall(r"\d+(?:-\d+)?", clean)
+    for part in parts:
+        if "-" in part:
+            start, end = part.split("-", 1)
+            numbers.extend(range(int(start), int(end) + 1))
+        else:
+            numbers.append(int(part))
+    return sorted(set(numbers))
+
+
+async def _execute_actions(user_text: str, bot: Bot | None = None) -> str:
+    """Esegue azioni batch sul digest corrente."""
+    text_lower = user_text.lower().strip()
+    numbers = _parse_numbers(user_text)
+
+    if not numbers and "tutto" not in text_lower:
+        return "\u26a0\ufe0f Non ho capito i numeri. Esempio: 'ok 1,3,5-8' o 'archivia tutto'"
+
+    # "archivia tutto" → tutti gli archivio
+    if "tutto" in text_lower:
+        numbers = [e["index"] for e in _last_digest if e["categoria"] == "archivio"]
+
+    # Trova email corrispondenti
+    targets = [e for e in _last_digest if e["index"] in numbers]
+    if not targets:
+        return "\u26a0\ufe0f Nessuna email trovata con quei numeri."
+
+    # Determina azione
+    if any(w in text_lower for w in ("elimina", "cancella")):
+        action = "elimina"
+    elif any(w in text_lower for w in ("archivia", "tutto")):
+        action = "archivia"
     else:
-        return await _smart_mail_handling(user_text)
+        # "ok" = conferma azioni proposte (archivia gli archivio, ecc.)
+        action = "conferma"
 
+    results = []
+    for email in targets:
+        if action == "conferma":
+            # Esegui l'azione proposta
+            if email["categoria"] == "archivio":
+                await _archive_email(email["id"])
+                results.append(f"  \u2705 #{email['index']} archiviata")
+            else:
+                results.append(f"  \u2139\ufe0f #{email['index']} \u2014 azione proposta confermata")
+        elif action == "archivia":
+            await _archive_email(email["id"])
+            results.append(f"  \u2705 #{email['index']} archiviata")
+        elif action == "elimina":
+            await _archive_email(email["id"])  # Per sicurezza: archivia, non elimina
+            results.append(f"  \u2705 #{email['index']} rimossa")
+
+    return (
+        f"\U0001f4e7 MailMind \u2014 Azioni eseguite\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+        + "\n".join(results)
+    )
+
+
+async def _archive_email(message_id: str):
+    """Archivia email via n8n webhook."""
+    try:
+        await call_webhook("hermes-mail-archive", {"message_id": message_id})
+    except Exception as e:
+        logger.error(f"Errore archiviazione email {message_id}: {e}")
+
+
+# ─── Sub-Agent: Drafter ───────────────────────────────────
+
+async def _handle_reply(user_text: str) -> str:
+    """Rispondi a email: 'rispondi 2 con: testo'."""
+    match = re.match(r"rispondi\s+(\d+)\s+con[:\s]+(.+)", user_text, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return "\u26a0\ufe0f Formato: 'rispondi 2 con: il tuo messaggio'"
+
+    num = int(match.group(1))
+    reply_text = match.group(2).strip()
+
+    email = next((e for e in _last_digest if e["index"] == num), None)
+    if not email:
+        return f"\u26a0\ufe0f Email #{num} non trovata nel digest corrente."
+
+    # Invia via n8n
+    try:
+        sender_email = email["from"]
+        # Estrai email da formato "Nome <email>"
+        email_match = re.search(r"<(.+?)>", sender_email)
+        to_addr = email_match.group(1) if email_match else sender_email
+
+        await call_webhook("hermes-mail-send", {
+            "to": to_addr,
+            "subject": f"Re: {email['subject']}",
+            "body": reply_text,
+        })
+        return f"\u2705 Risposta inviata a {to_addr}\nOggetto: Re: {email['subject']}"
+    except Exception as e:
+        return f"\u26a0\ufe0f Errore invio risposta: {str(e)[:200]}"
+
+
+async def _handle_draft(user_text: str) -> str:
+    """Genera bozza risposta AI: 'bozza 3'."""
+    match = re.match(r"bozz[ae]\s+(\d+)", user_text, re.IGNORECASE)
+    if not match:
+        return "\u26a0\ufe0f Formato: 'bozza 3'"
+
+    num = int(match.group(1))
+    email = next((e for e in _last_digest if e["index"] == num), None)
+    if not email:
+        return f"\u26a0\ufe0f Email #{num} non trovata nel digest corrente."
+
+    # Cerca contesto mittente nella KB
+    sender_context = email.get("sender_info", "")
+
+    response = await chat(
+        messages=[
+            {"role": "system", "content": (
+                "Sei MailMind di HERMES. Genera una bozza di risposta email professionale "
+                "ma diretta, in italiano. Stile: breve, cordiale, operativo. "
+                "Non essere troppo formale. Juan \u00e8 un consulente AI/media buyer."
+                f"\n\nInfo mittente dalla KB: {sender_context or 'nessuna info disponibile'}"
+            )},
+            {"role": "user", "content": (
+                f"Da: {email['from']}\n"
+                f"Oggetto: {email['subject']}\n"
+                f"Contenuto: {email['snippet']}\n\n"
+                "Genera una bozza di risposta."
+            )},
+        ],
+        complexity=TaskComplexity.MEDIUM,
+        temperature=0.4,
+        max_tokens=512,
+    )
+
+    return (
+        f"\u270f\ufe0f Bozza risposta a #{num}\n"
+        f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+        f"A: {email['from']}\n"
+        f"Oggetto: Re: {email['subject']}\n\n"
+        f"{response}\n\n"
+        f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+        f"Per inviare: 'rispondi {num} con: [testo]'\n"
+        f"O modifica e incolla."
+    )
+
+
+# ─── Chi \u00e8 ──────────────────────────────────────────────
+
+async def _handle_who_is(user_text: str) -> str:
+    """Cerca info su mittente nella KB."""
+    name = user_text.lower()
+    for prefix in ("chi \u00e8", "chi e'", "who is"):
+        name = name.replace(prefix, "")
+    name = name.strip()
+
+    result = await kb.search_entity(name)
+    if result:
+        return f"\U0001f464 {name}:\n{result}"
+    return f"\U0001f464 {name}: non trovato nella Knowledge Base. Dimmi chi \u00e8 e lo salvo!"
+
+
+# ─── Conversazione Libera ─────────────────────────────────
+
+async def _conversational_mail(user_text: str) -> str:
+    """Gestione conversazionale delle email — parla liberamente."""
+    # Includi contesto del digest se presente
+    digest_context = ""
+    if _last_digest:
+        digest_context = "Ultimo digest email:\n" + "\n".join(
+            f"  {e['index']}. {e['from'][:30]} | {e['subject'][:50]} | {e['categoria']}"
+            for e in _last_digest[:10]
+        )
+
+    response = await chat(
+        messages=[
+            {"role": "system", "content": (
+                "Sei MailMind di HERMES OS. L'utente sta parlando delle sue email. "
+                "Puoi rispondere a domande, suggerire azioni, generare risposte. "
+                "Hai accesso al digest delle email non lette. "
+                "Rispondi in italiano, breve e operativo.\n\n"
+                f"{digest_context}"
+            )},
+            {"role": "user", "content": user_text},
+        ],
+        complexity=TaskComplexity.MEDIUM,
+        temperature=0.4,
+        max_tokens=1024,
+    )
+    return response
+
+
+# ─── Setup n8n Workflows ──────────────────────────────────
 
 async def setup_n8n_workflows() -> str:
-    """
-    Crea i workflow n8n necessari per MailMind.
-    Va eseguito una sola volta durante il setup.
-    """
+    """Crea i workflow n8n necessari per MailMind."""
     workflows_created = []
 
-    # 1. Workflow: Fetch email non lette
     fetch_workflow = {
         "name": "HERMES - Mail Fetch",
         "nodes": [
@@ -112,7 +589,6 @@ async def setup_n8n_workflows() -> str:
         "settings": {"executionOrder": "v1"},
     }
 
-    # 2. Workflow: Invia email
     send_workflow = {
         "name": "HERMES - Mail Send",
         "nodes": [
@@ -150,7 +626,6 @@ async def setup_n8n_workflows() -> str:
         "settings": {"executionOrder": "v1"},
     }
 
-    # 3. Workflow: Archivia email
     archive_workflow = {
         "name": "HERMES - Mail Archive",
         "nodes": [
@@ -202,68 +677,27 @@ async def setup_n8n_workflows() -> str:
         "\u26a0\ufe0f IMPORTANTE: vai su n8n e:\n"
         "1. Collega le credenziali Gmail a ogni workflow\n"
         "2. Attiva i workflow\n"
-        "3. Copia i webhook URL e comunicali a HERMES"
+        "3. Testa con: 'controlla email'"
     )
 
 
-async def _generate_digest(bot: Bot | None = None) -> str:
-    """Genera digest email (quando i webhook saranno configurati)."""
-    return (
-        "\U0001f4e7 MailMind \u2014 Digest\n"
-        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
-        "Per attivare il digest automatico:\n"
-        "1. Scrivi 'configura mailmind' per creare i workflow n8n\n"
-        "2. Configura le credenziali Gmail su n8n\n"
-        "3. Attiva i workflow\n\n"
-        "Una volta attivo, il digest arriver\u00e0 ogni sera alle 19:00"
-    )
+# ─── Scheduled Digest (chiamato da APScheduler) ──────────
 
+async def scheduled_morning_digest():
+    """Chiamato ogni mattina alle 09:00 da APScheduler."""
+    from telegram import Bot as TgBot
 
-async def _handle_delete(user_text: str) -> str:
-    """Elimina email via n8n."""
-    return "\U0001f4e7 Per eliminare email, prima configura MailMind con: 'configura mailmind'"
+    if not config.TELEGRAM_MAIL_TOKEN and not config.TELEGRAM_MASTER_TOKEN:
+        logger.warning("MailMind scheduled: nessun token bot configurato")
+        return
 
+    # Usa il mail bot se disponibile, altrimenti master
+    token = config.TELEGRAM_MAIL_TOKEN or config.TELEGRAM_MASTER_TOKEN
+    bot = TgBot(token=token)
 
-async def _handle_archive(user_text: str) -> str:
-    """Archivia email via n8n."""
-    return "\U0001f4e7 Per archiviare email, prima configura MailMind con: 'configura mailmind'"
-
-
-async def _handle_reply(user_text: str) -> str:
-    """Rispondi a email via n8n."""
-    return "\U0001f4e7 Per rispondere, prima configura MailMind con: 'configura mailmind'"
-
-
-async def _handle_draft(user_text: str) -> str:
-    """Genera bozza risposta."""
-    return "\U0001f4e7 Per generare bozze, prima configura MailMind con: 'configura mailmind'"
-
-
-async def _handle_who_is(user_text: str) -> str:
-    """Cerca info su mittente nella KB."""
-    from core import knowledge_base as kb
-    # Estrai nome dal messaggio
-    name = user_text.lower().replace("chi è", "").replace("chi e'", "").replace("who is", "").strip()
-    result = await kb.search_entity(name)
-    if result:
-        return f"\U0001f464 {name}:\n{result}"
-    return f"\U0001f464 {name}: non trovato nella Knowledge Base. Dimmi chi \u00e8 e lo salvo!"
-
-
-async def _smart_mail_handling(user_text: str) -> str:
-    """Gestione intelligente richieste email ambigue."""
-    response = await chat(
-        messages=[
-            {"role": "system", "content": (
-                "Sei MailMind di HERMES. L'utente chiede qualcosa relativo alle email. "
-                "Il sistema funziona tramite n8n webhooks per Gmail. "
-                "Se il sistema non \u00e8 ancora configurato, guidalo a farlo. "
-                "Rispondi in italiano, breve e operativo."
-            )},
-            {"role": "user", "content": user_text},
-        ],
-        complexity=TaskComplexity.LIGHT,
-        temperature=0.3,
-        max_tokens=512,
-    )
-    return response
+    try:
+        digest = await run_email_analysis(bot)
+        await bot.send_message(chat_id=config.TELEGRAM_CHAT_ID, text=digest)
+        logger.info("MailMind: digest mattutino inviato")
+    except Exception as e:
+        logger.error(f"MailMind scheduled digest error: {e}")
