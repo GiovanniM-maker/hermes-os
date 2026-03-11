@@ -3,6 +3,7 @@ HERMES OS — Entry Point
 FastAPI app + Telegram multi-bot webhooks + APScheduler
 """
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -162,5 +163,7 @@ async def telegram_webhook(bot_name: str, request: Request):
 
     data = await request.json()
     update = Update.de_json(data, bot_app.bot)
-    await bot_app.process_update(update)
+
+    # Process in background — return 200 immediately to prevent Telegram retries
+    asyncio.create_task(bot_app.process_update(update))
     return Response(status_code=200)

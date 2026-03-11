@@ -19,9 +19,21 @@ from core import memory
 logger = logging.getLogger("hermes.code_forge")
 
 
+_META_KEYWORDS = (
+    "cosa fai", "chi sei", "come funzioni", "help", "aiuto",
+    "cosa puoi fare", "che sai fare", "presentati", "info",
+    "cosa sai", "come ti uso", "istruzioni",
+)
+
+
 async def handle_request(user_text: str, bot: Bot | None = None) -> str:
     """Entry point CodeForge."""
     logger.info(f"CodeForge: nuova richiesta — {user_text[:100]}")
+
+    # ─── Pre-check: domande informative/meta ──────────────
+    text_lower = user_text.lower().strip()
+    if any(kw in text_lower for kw in _META_KEYWORDS) or (len(text_lower) < 15 and "?" in text_lower):
+        return await _handle_meta(user_text)
 
     # ─── Step 1: Analyst — capisce cosa serve ─────────
     analysis = await _analyze(user_text, bot)
@@ -70,6 +82,33 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
         f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
         f"```{lang}\n{code_display}\n```\n\n"
         f"{explanation}"
+    )
+
+
+# ─── Meta / Info Queries ──────────────────────────────────
+
+async def _handle_meta(user_text: str) -> str:
+    """Rispondi a domande informative su CodeForge."""
+    return await chat(
+        messages=[
+            {"role": "system", "content": (
+                "Sei CodeForge, il bot di HERMES OS che genera codice. "
+                "L'utente ti sta facendo una domanda informativa (non una richiesta di codice). "
+                "Rispondi in italiano, breve e chiaro. Spiega cosa fai e come usarti.\n\n"
+                "Le tue capacita':\n"
+                "- Genero codice in Python, JavaScript/TypeScript, HTML/CSS, React, shell scripts\n"
+                "- Creo: script, landing page, componenti React, API, bot, automazioni\n"
+                "- Il flusso: analizzo la richiesta -> genero il codice -> review qualita' -> "
+                "correggo eventuali problemi -> consegno\n"
+                "- Se mi mancano info, chiedo chiarimenti prima di procedere\n\n"
+                "Esempio d'uso: 'Scrivi uno script Python che scrape i prezzi da Amazon' "
+                "oppure 'Crea una landing page per un corso di AI'"
+            )},
+            {"role": "user", "content": user_text},
+        ],
+        complexity=TaskComplexity.LIGHT,
+        temperature=0.5,
+        max_tokens=512,
     )
 
 

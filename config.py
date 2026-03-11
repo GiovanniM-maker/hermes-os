@@ -22,8 +22,8 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # Modelli disponibili via OpenRouter
 LLM_MODEL_HEAVY = os.environ.get("LLM_MODEL_HEAVY", "anthropic/claude-sonnet-4")
-LLM_MODEL_MEDIUM = os.environ.get("LLM_MODEL_MEDIUM", "google/gemini-2.0-pro-exp-02-05")
-LLM_MODEL_LIGHT = os.environ.get("LLM_MODEL_LIGHT", "google/gemini-2.0-flash-001")
+LLM_MODEL_MEDIUM = os.environ.get("LLM_MODEL_MEDIUM", "google/gemini-2.5-pro")
+LLM_MODEL_LIGHT = os.environ.get("LLM_MODEL_LIGHT", "google/gemini-2.5-flash")
 
 # ─── Google Drive (Knowledge Base) ───────────────────────
 HERMES_DRIVE_FOLDER_ID = os.environ.get("HERMES_DRIVE_FOLDER_ID", "")

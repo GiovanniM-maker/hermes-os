@@ -31,6 +31,10 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
     """
     logger.info(f"PipelineForge: nuova richiesta — {user_text[:100]}")
 
+    # ─── Pre-check: domande informative/meta ──────────────
+    if await _is_meta_query(user_text):
+        return await _handle_meta(user_text)
+
     # ─── Step 1: Clarifier ───────────────────────────────
     clarification = await _clarify(user_text, bot)
     if clarification.get("needs_input"):
@@ -61,6 +65,51 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
             f"Workflow ID: {result.get('workflow_id', 'N/A')} — "
             f"puoi verificarlo manualmente su n8n."
         )
+
+
+# ─── Meta / Info Queries ──────────────────────────────────
+
+_META_KEYWORDS = (
+    "cosa fai", "chi sei", "come funzioni", "help", "aiuto",
+    "cosa puoi fare", "che sai fare", "presentati", "info",
+    "cosa sai", "come ti uso", "istruzioni",
+)
+
+
+async def _is_meta_query(user_text: str) -> bool:
+    """Rileva domande informative/meta che non sono richieste di workflow."""
+    text_lower = user_text.lower().strip()
+    if any(kw in text_lower for kw in _META_KEYWORDS):
+        return True
+    # Messaggi troppo corti per essere specifiche di workflow
+    if len(text_lower) < 15 and "?" in text_lower:
+        return True
+    return False
+
+
+async def _handle_meta(user_text: str) -> str:
+    """Rispondi a domande informative su PipelineForge."""
+    return await chat(
+        messages=[
+            {"role": "system", "content": (
+                "Sei PipelineForge, il bot di HERMES OS che crea workflow n8n. "
+                "L'utente ti sta facendo una domanda informativa (non una richiesta di workflow). "
+                "Rispondi in italiano, breve e chiaro. Spiega cosa fai e come usarti.\n\n"
+                "Le tue capacita':\n"
+                "- Creo workflow n8n da descrizioni in linguaggio naturale\n"
+                "- Supporto: webhook, schedule, Google Sheets, Gmail, Airtable, Notion, Slack, ecc.\n"
+                "- Il flusso: capisco la richiesta -> progetto l'architettura -> genero il JSON -> "
+                "testo su n8n -> debug automatico -> deploy\n"
+                "- Se mi mancano info, chiedo chiarimenti prima di procedere\n\n"
+                "Esempio d'uso: 'Crea un workflow che quando arriva un lead da un form webhook, "
+                "lo salva su Google Sheets e manda una notifica su Slack'"
+            )},
+            {"role": "user", "content": user_text},
+        ],
+        complexity=TaskComplexity.LIGHT,
+        temperature=0.5,
+        max_tokens=512,
+    )
 
 
 # ─── Sub-Agents ──────────────────────────────────────────
