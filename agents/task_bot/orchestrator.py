@@ -14,6 +14,7 @@ import config
 from core.llm_router import chat, TaskComplexity
 from core import knowledge_base as kb
 from core import memory
+from core.question_engine import ask_questions
 
 logger = logging.getLogger("hermes.taskbot")
 
@@ -59,7 +60,7 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
 
     else:
         # Usa LLM per capire cosa vuole
-        return await _smart_task_handling(user_text)
+        return await _smart_task_handling(user_text, bot=bot)
 
 
 async def _add_task(description: str, client: str | None = None) -> str:
@@ -230,29 +231,75 @@ async def _estimate_time(description: str) -> int:
         return 30  # Default 30 minuti
 
 
-async def _smart_task_handling(user_text: str) -> str:
-    """Usa LLM per interpretare richieste task ambigue."""
-    response = await chat(
+async def _smart_task_handling(user_text: str, bot: Bot | None = None) -> str:
+    """Usa LLM per interpretare richieste task ambigue. Chiede chiarimenti se necessario."""
+
+    # Step 1: LLM analizza l'intent
+    analysis = await chat(
         messages=[
             {"role": "system", "content": (
-                "Sei TaskBot di HERMES. L'utente sta facendo una richiesta relativa alle task. "
-                "Interpreta cosa vuole e rispondi con l'azione da fare. "
-                "Se vuole aggiungere una task, estraila. "
-                "Se chiede info, rispondi. "
-                "Rispondi in italiano, breve e operativo."
+                "Sei TaskBot di HERMES. Analizza la richiesta dell'utente.\n"
+                "Rispondi in JSON con questa struttura:\n"
+                '{"action": "add_task"|"info"|"unclear", '
+                '"description": "descrizione task se action=add_task", '
+                '"client": "nome cliente se menzionato, altrimenti null", '
+                '"questions": ["domanda1", ...] se action=unclear}\n'
+                "Se la richiesta è vaga o manca info critica, usa action=unclear "
+                "e fornisci domande specifiche.\n"
+                "Rispondi SOLO col JSON, nient'altro."
             )},
             {"role": "user", "content": user_text},
         ],
         complexity=TaskComplexity.LIGHT,
-        temperature=0.3,
-        max_tokens=512,
+        temperature=0.2,
+        max_tokens=256,
     )
 
-    # Se l'LLM suggerisce di aggiungere una task, fallo
-    if "aggiungi" in response.lower() or "aggiunta" in response.lower():
+    try:
+        data = json.loads(analysis.strip())
+    except json.JSONDecodeError:
+        # Fallback: tratta come richiesta diretta
         return await _add_task(user_text)
 
-    return response
+    action = data.get("action", "info")
+
+    if action == "add_task":
+        desc = data.get("description", user_text)
+        client = data.get("client")
+        return await _add_task(desc, client=client)
+
+    elif action == "unclear" and data.get("questions") and bot:
+        # Chiedi chiarimenti prima di procedere
+        answers = await ask_questions(
+            agent_name="TaskBot",
+            task_description=f"Gestione richiesta: {user_text}",
+            questions=data["questions"][:3],
+            bot=bot,
+        )
+
+        if answers:
+            # Ri-processa con le risposte come contesto aggiuntivo
+            context_text = f"{user_text}\n\nChiarimenti:\n"
+            context_text += "\n".join(f"- {q}: {a}" for q, a in answers.items())
+            return await _add_task(context_text)
+        else:
+            return "\u23f3 In attesa dei tuoi chiarimenti..."
+
+    else:
+        # Info generica — rispondi con LLM
+        response = await chat(
+            messages=[
+                {"role": "system", "content": (
+                    "Sei TaskBot di HERMES. Rispondi alla richiesta dell'utente "
+                    "relativa alle sue task. Italiano, breve, operativo."
+                )},
+                {"role": "user", "content": user_text},
+            ],
+            complexity=TaskComplexity.LIGHT,
+            temperature=0.3,
+            max_tokens=512,
+        )
+        return response
 
 
 # ─── Task da fonti esterne (usato da MailMind, ecc.) ─────

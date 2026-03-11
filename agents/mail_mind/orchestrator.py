@@ -22,6 +22,7 @@ from telegram import Bot
 
 import config
 from core.llm_router import chat, TaskComplexity
+from core.question_engine import ask_questions
 from core import memory
 from core import knowledge_base as kb
 from agents.pipeline_forge.n8n_client import import_workflow, call_webhook
@@ -48,9 +49,9 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
     if _last_digest and _looks_like_action(text_lower):
         return await _execute_actions(user_text, bot)
 
-    # Rispondi a email specifica (es: "rispondi 2 con: grazie per la proposta")
+    # Rispondi a email specifica (es: "rispondi 2 con: grazie" o "rispondi 2")
     if re.match(r"rispondi\s+\d+", text_lower):
-        return await _handle_reply(user_text)
+        return await _handle_reply(user_text, bot)
 
     # Genera bozza (es: "bozza 3")
     if re.match(r"bozz[ae]\s+\d+", text_lower):
@@ -419,14 +420,41 @@ async def _archive_email(message_id: str):
 
 # ─── Sub-Agent: Drafter ───────────────────────────────────
 
-async def _handle_reply(user_text: str) -> str:
-    """Rispondi a email: 'rispondi 2 con: testo'."""
-    match = re.match(r"rispondi\s+(\d+)\s+con[:\s]+(.+)", user_text, re.IGNORECASE | re.DOTALL)
-    if not match:
-        return "\u26a0\ufe0f Formato: 'rispondi 2 con: il tuo messaggio'"
+async def _handle_reply(user_text: str, bot: Bot | None = None) -> str:
+    """Rispondi a email: 'rispondi 2 con: testo' oppure 'rispondi 2' (chiede cosa dire)."""
+    # Con testo esplicito
+    match_full = re.match(r"rispondi\s+(\d+)\s+con[:\s]+(.+)", user_text, re.IGNORECASE | re.DOTALL)
+    # Solo numero (senza testo → chiedi)
+    match_num = re.match(r"rispondi\s+(\d+)\s*$", user_text, re.IGNORECASE)
 
-    num = int(match.group(1))
-    reply_text = match.group(2).strip()
+    if match_full:
+        num = int(match_full.group(1))
+        reply_text = match_full.group(2).strip()
+    elif match_num:
+        num = int(match_num.group(1))
+        email = next((e for e in _last_digest if e["index"] == num), None)
+        if not email:
+            return f"\u26a0\ufe0f Email #{num} non trovata nel digest corrente."
+
+        # Chiedi cosa rispondere
+        if bot:
+            answers = await ask_questions(
+                agent_name="MailMind",
+                task_description=f"Rispondere a: {email['from']} — «{email['subject']}»",
+                questions=["Cosa vuoi che risponda? (oppure scrivo io una bozza AI — rispondi 'bozza')"],
+                bot=bot,
+            )
+            if answers:
+                answer = answers.get(1, "")
+                if "bozza" in answer.lower():
+                    return await _handle_draft(f"bozza {num}")
+                reply_text = answer
+            else:
+                return await _handle_draft(f"bozza {num}")
+        else:
+            return f"\u270f\ufe0f Per rispondere: 'rispondi {num} con: il tuo messaggio'\nOppure: 'bozza {num}' per generare una bozza AI"
+    else:
+        return "\u26a0\ufe0f Formato: 'rispondi 2 con: il tuo messaggio' oppure 'rispondi 2'"
 
     email = next((e for e in _last_digest if e["index"] == num), None)
     if not email:
@@ -435,7 +463,6 @@ async def _handle_reply(user_text: str) -> str:
     # Invia via n8n
     try:
         sender_email = email["from"]
-        # Estrai email da formato "Nome <email>"
         email_match = re.search(r"<(.+?)>", sender_email)
         to_addr = email_match.group(1) if email_match else sender_email
 
@@ -449,13 +476,15 @@ async def _handle_reply(user_text: str) -> str:
         return f"\u26a0\ufe0f Errore invio risposta: {str(e)[:200]}"
 
 
-async def _handle_draft(user_text: str) -> str:
-    """Genera bozza risposta AI: 'bozza 3'."""
-    match = re.match(r"bozz[ae]\s+(\d+)", user_text, re.IGNORECASE)
+async def _handle_draft(user_text: str, bot: Bot | None = None) -> str:
+    """Genera bozza risposta AI: 'bozza 3' o 'bozza 3 formale/informale/...'."""
+    match = re.match(r"bozz[ae]\s+(\d+)\s*(.*)", user_text, re.IGNORECASE)
     if not match:
-        return "\u26a0\ufe0f Formato: 'bozza 3'"
+        return "\u26a0\ufe0f Formato: 'bozza 3' oppure 'bozza 3 formale'"
 
     num = int(match.group(1))
+    tone_hint = match.group(2).strip() if match.group(2) else ""
+
     email = next((e for e in _last_digest if e["index"] == num), None)
     if not email:
         return f"\u26a0\ufe0f Email #{num} non trovata nel digest corrente."
@@ -463,12 +492,17 @@ async def _handle_draft(user_text: str) -> str:
     # Cerca contesto mittente nella KB
     sender_context = email.get("sender_info", "")
 
+    tone_instruction = ""
+    if tone_hint:
+        tone_instruction = f"\nTono richiesto: {tone_hint}."
+
     response = await chat(
         messages=[
             {"role": "system", "content": (
                 "Sei MailMind di HERMES. Genera una bozza di risposta email professionale "
                 "ma diretta, in italiano. Stile: breve, cordiale, operativo. "
                 "Non essere troppo formale. Juan \u00e8 un consulente AI/media buyer."
+                f"{tone_instruction}"
                 f"\n\nInfo mittente dalla KB: {sender_context or 'nessuna info disponibile'}"
             )},
             {"role": "user", "content": (

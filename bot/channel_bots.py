@@ -18,6 +18,7 @@ from telegram.ext import (
 import config
 from core.llm_router import chat, TaskComplexity
 from core.transcriber import transcribe_voice
+from core.question_engine import receive_answer, has_pending_questions
 from core import memory
 
 logger = logging.getLogger("hermes.channel_bots")
@@ -131,8 +132,15 @@ async def _pipeline_message(update: Update, context):
         await update.message.reply_text("\u26d4 Non autorizzato.")
         return
 
-    from agents.pipeline_forge.orchestrator import handle_request
     user_text = update.message.text.strip()
+
+    # Se c'è una domanda pending, la risposta va al Question Engine
+    if has_pending_questions():
+        if receive_answer(user_text):
+            await update.message.reply_text("\u2705 Risposta ricevuta! Procedo...")
+            return
+
+    from agents.pipeline_forge.orchestrator import handle_request
     memory.add_message("user", f"[PipelineForge] {user_text}")
 
     await update.message.reply_text("\u2699\ufe0f Analizzo la richiesta pipeline...")
@@ -167,8 +175,14 @@ async def _mail_message(update: Update, context):
         await update.message.reply_text("\u26d4 Non autorizzato.")
         return
 
-    from agents.mail_mind.orchestrator import handle_request
     user_text = update.message.text.strip()
+
+    if has_pending_questions():
+        if receive_answer(user_text):
+            await update.message.reply_text("\u2705 Risposta ricevuta! Procedo...")
+            return
+
+    from agents.mail_mind.orchestrator import handle_request
     memory.add_message("user", f"[MailMind] {user_text}")
 
     try:
@@ -202,8 +216,14 @@ async def _tasks_message(update: Update, context):
         await update.message.reply_text("\u26d4 Non autorizzato.")
         return
 
-    from agents.task_bot.orchestrator import handle_request
     user_text = update.message.text.strip()
+
+    if has_pending_questions():
+        if receive_answer(user_text):
+            await update.message.reply_text("\u2705 Risposta ricevuta! Procedo...")
+            return
+
+    from agents.task_bot.orchestrator import handle_request
     memory.add_message("user", f"[TaskBot] {user_text}")
 
     try:
@@ -236,8 +256,14 @@ async def _build_message(update: Update, context):
         await update.message.reply_text("\u26d4 Non autorizzato.")
         return
 
-    from agents.code_forge.orchestrator import handle_request
     user_text = update.message.text.strip()
+
+    if has_pending_questions():
+        if receive_answer(user_text):
+            await update.message.reply_text("\u2705 Risposta ricevuta! Procedo...")
+            return
+
+    from agents.code_forge.orchestrator import handle_request
     memory.add_message("user", f"[CodeForge] {user_text}")
 
     await update.message.reply_text("\U0001f4bb Genero il codice...")
