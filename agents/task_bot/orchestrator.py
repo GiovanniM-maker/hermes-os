@@ -84,12 +84,14 @@ async def _add_task(description: str, client: str | None = None) -> str:
 
     logger.info(f"Task aggiunta: #{_task_counter} — {description}")
 
+    client_line = f"\U0001f465 Cliente: {client}" if client else ""
+
     return (
         f"\u2705 Task #{_task_counter} aggiunta\n"
         f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
         f"\U0001f4cb {description}\n"
         f"\u23f1\ufe0f Stima: ~{estimate} min\n"
-        f"{f'\U0001f465 Cliente: {client}' if client else ''}"
+        f"{client_line}"
     )
 
 
