@@ -29,6 +29,15 @@ from agents.pipeline_forge.n8n_client import import_workflow, call_webhook
 
 logger = logging.getLogger("hermes.mailmind")
 
+# ─── Meta Keywords ────────────────────────────────────────
+_META_KEYWORDS = (
+    "cosa fai", "chi sei", "come funzioni", "help", "aiuto",
+    "cosa puoi fare", "che sai fare", "presentati", "info",
+    "cosa sai", "come ti uso", "istruzioni",
+    "potresti", "puoi fare", "sei capace", "sai fare",
+    "riesci a", "funzionalità", "capacità",
+)
+
 # ─── State ────────────────────────────────────────────────
 # Ultimo digest in memoria per interazione conversazionale
 _last_digest: list[dict] = []
@@ -40,6 +49,10 @@ _digest_timestamp: str = ""
 async def handle_request(user_text: str, bot: Bot | None = None) -> str:
     """Entry point MailMind — gestisce comandi e conversazione."""
     text_lower = user_text.lower().strip()
+
+    # ─── Pre-check: domande informative/meta ──────────────
+    if _is_meta_query(text_lower):
+        return await _handle_meta(user_text)
 
     # Setup n8n workflows
     if "setup" in text_lower or "configura" in text_lower:
@@ -67,6 +80,58 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
 
     # Conversazione libera sulle email
     return await _conversational_mail(user_text)
+
+
+# ─── Meta / Info Queries ──────────────────────────────────
+
+def _is_meta_query(text_lower: str) -> bool:
+    """Rileva domande informative/meta su MailMind."""
+    if any(kw in text_lower for kw in _META_KEYWORDS):
+        return True
+    if len(text_lower) < 15 and "?" in text_lower:
+        return True
+    # Domande esplorative con "?" che non sono comandi email
+    if "?" in text_lower and not any(v in text_lower for v in (
+        "rispondi", "bozza", "archivia", "elimina", "digest",
+        "controlla", "email", "mail", "posta",
+    )):
+        return True
+    return False
+
+
+async def _handle_meta(user_text: str) -> str:
+    """Rispondi a domande informative su MailMind."""
+    return await chat(
+        messages=[
+            {"role": "system", "content": (
+                "Sei MailMind, il bot di HERMES OS che gestisce le email di Juan. "
+                "L'utente ti sta facendo una domanda informativa (non un comando email). "
+                "Rispondi in italiano, breve e chiaro. Spiega cosa fai e come usarti.\n\n"
+                "Le tue capacita':\n"
+                "- Controllo email non lette e creo un digest interattivo classificato "
+                "(urgente/da rispondere/da leggere/task/archivio)\n"
+                "- Estraggo task automaticamente dalle email e le mando a TaskBot\n"
+                "- Cerco mittenti nella Knowledge Base per darti contesto\n"
+                "- Genero bozze di risposta AI con il tono giusto\n"
+                "- Invio risposte email direttamente\n"
+                "- Archivio email in batch\n"
+                "- Digest automatico ogni mattina alle 09:00\n"
+                "- Conversazione libera sulle email\n\n"
+                "Comandi principali:\n"
+                "- 'controlla email' / 'digest' — fetch e analisi email\n"
+                "- 'rispondi 2 con: testo' — rispondi a email #2\n"
+                "- 'bozza 3' — genera bozza AI per email #3\n"
+                "- 'ok 1,4-8' — conferma azioni proposte\n"
+                "- 'archivia 1,3,7' o 'archivia tutto'\n"
+                "- 'chi e' Marco Rossi' — cerca nella KB\n"
+                "- 'configura mailmind' — setup workflow n8n"
+            )},
+            {"role": "user", "content": user_text},
+        ],
+        complexity=TaskComplexity.LIGHT,
+        temperature=0.5,
+        max_tokens=512,
+    )
 
 
 # ─── Core: Analisi Email Autonoma ─────────────────────────

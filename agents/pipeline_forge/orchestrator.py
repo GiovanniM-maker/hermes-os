@@ -93,24 +93,28 @@ _META_KEYWORDS = (
     "cosa fai", "chi sei", "come funzioni", "help", "aiuto",
     "cosa puoi fare", "che sai fare", "presentati", "info",
     "cosa sai", "come ti uso", "istruzioni",
-    "potresti", "puoi fare", "sei capace", "sai fare",
-    "riesci a", "funzionalità", "capacità",
+)
+
+# Verbi che indicano una richiesta concreta di workflow (NON meta)
+_ACTION_VERBS = (
+    "crea", "genera", "costruisci", "fai un", "automatizza",
+    "connetti", "integra", "workflow", "crearmi", "creami",
+    "voglio", "ho bisogno", "mi serve", "fammi",
 )
 
 
 async def _is_meta_query(user_text: str) -> bool:
     """Rileva domande informative/meta che non sono richieste di workflow."""
     text_lower = user_text.lower().strip()
+
+    # Se contiene verbi d'azione concreti, NON e' meta
+    if any(v in text_lower for v in _ACTION_VERBS):
+        return False
+
     if any(kw in text_lower for kw in _META_KEYWORDS):
         return True
     # Messaggi troppo corti per essere specifiche di workflow
     if len(text_lower) < 15 and "?" in text_lower:
-        return True
-    # Domande esplorative con "?" che non contengono verbi d'azione concreti
-    if "?" in text_lower and not any(v in text_lower for v in (
-        "crea ", "genera ", "costruisci ", "fai un workflow",
-        "automatizza ", "connetti ", "integra ",
-    )):
         return True
     return False
 
@@ -120,15 +124,24 @@ async def _handle_meta(user_text: str) -> str:
     return await chat(
         messages=[
             {"role": "system", "content": (
-                "Sei PipelineForge, il bot di HERMES OS che crea workflow n8n. "
+                "Sei PipelineForge, il bot di HERMES OS che crea e deploya workflow n8n. "
                 "L'utente ti sta facendo una domanda informativa (non una richiesta di workflow). "
                 "Rispondi in italiano, breve e chiaro. Spiega cosa fai e come usarti.\n\n"
                 "Le tue capacita':\n"
                 "- Creo workflow n8n da descrizioni in linguaggio naturale\n"
-                "- Supporto: webhook, schedule, Google Sheets, Gmail, Airtable, Notion, Slack, ecc.\n"
-                "- Il flusso: capisco la richiesta -> progetto l'architettura -> genero il JSON -> "
-                "testo su n8n -> debug automatico -> deploy\n"
+                "- Li importo DIRETTAMENTE sulla tua istanza n8n via API (non genero solo JSON)\n"
+                "- Li testo automaticamente e debuggo se ci sono errori (max 5 iterazioni)\n"
+                "- Li attivo e ti do il link per verificarli\n"
+                "- Supporto: webhook, schedule, Google Sheets, Gmail, Airtable, Notion, Slack, "
+                "HTTP request, e tutti i nodi n8n\n"
                 "- Se mi mancano info, chiedo chiarimenti prima di procedere\n\n"
+                "Il mio flusso completo:\n"
+                "1. Capisco la richiesta (chiedo chiarimenti se serve)\n"
+                "2. Progetto l'architettura del workflow\n"
+                "3. Genero il JSON n8n completo\n"
+                "4. Lo importo sulla tua istanza n8n via API\n"
+                "5. Lo testo e debuggo automaticamente\n"
+                "6. Ti mando il link del workflow attivo\n\n"
                 "Esempio d'uso: 'Crea un workflow che quando arriva un lead da un form webhook, "
                 "lo salva su Google Sheets e manda una notifica su Slack'"
             )},
