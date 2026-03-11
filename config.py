@@ -9,10 +9,11 @@ import base64
 
 # ─── Telegram ────────────────────────────────────────────
 TELEGRAM_MASTER_TOKEN = os.environ.get("TELEGRAM_MASTER_TOKEN", "")
-TELEGRAM_ADS_TOKEN = os.environ.get("TELEGRAM_ADS_TOKEN", "")
+TELEGRAM_PIPELINE_TOKEN = os.environ.get("TELEGRAM_PIPELINE_TOKEN", "")
 TELEGRAM_MAIL_TOKEN = os.environ.get("TELEGRAM_MAIL_TOKEN", "")
 TELEGRAM_TASKS_TOKEN = os.environ.get("TELEGRAM_TASKS_TOKEN", "")
 TELEGRAM_BUILD_TOKEN = os.environ.get("TELEGRAM_BUILD_TOKEN", "")
+TELEGRAM_ADS_TOKEN = os.environ.get("TELEGRAM_ADS_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # ─── LLM — OpenRouter (gateway unico per Claude + Gemini) ──

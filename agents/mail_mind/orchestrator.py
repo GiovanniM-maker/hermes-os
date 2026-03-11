@@ -35,7 +35,11 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
     """Entry point MailMind."""
     text_lower = user_text.lower().strip()
 
-    if any(w in text_lower for w in ("elimina", "cancella", "delete")):
+    # "configura/setup" PRIMA del check generico "mail" (mailmind contiene "mail")
+    if "setup" in text_lower or "configura" in text_lower:
+        return await setup_n8n_workflows()
+
+    elif any(w in text_lower for w in ("elimina", "cancella", "delete")):
         return await _handle_delete(user_text)
 
     elif any(w in text_lower for w in ("archivia", "archive")):
@@ -52,9 +56,6 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
 
     elif any(w in text_lower for w in ("digest", "email", "mail", "posta")):
         return await _generate_digest(bot)
-
-    elif "setup" in text_lower or "configura" in text_lower:
-        return await setup_n8n_workflows()
 
     else:
         return await _smart_mail_handling(user_text)

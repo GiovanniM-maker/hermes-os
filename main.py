@@ -1,6 +1,6 @@
 """
 HERMES OS — Entry Point
-FastAPI app + Telegram webhook + APScheduler
+FastAPI app + Telegram multi-bot webhooks + APScheduler
 """
 
 import logging
@@ -25,6 +25,7 @@ from bot.master import (
     handle_callback,
     handle_voice,
 )
+from bot.channel_bots import build_channel_bot, get_all_channel_names
 
 # ─── Logging ─────────────────────────────────────────────
 logging.basicConfig(
@@ -36,51 +37,36 @@ logger = logging.getLogger("hermes")
 # ─── Scheduler ───────────────────────────────────────────
 scheduler = AsyncIOScheduler()
 
-# ─── Telegram Application ────────────────────────────────
-telegram_app: Application | None = None
+# ─── Bot Registry ────────────────────────────────────────
+# Maps webhook path suffix → Application
+bot_registry: dict[str, Application] = {}
 
 
-def build_telegram_app() -> Application | None:
-    """Build the Telegram bot application."""
+def build_master_app() -> Application | None:
+    """Build the Master Telegram bot."""
     token = config.TELEGRAM_MASTER_TOKEN
     if not token:
         logger.warning("TELEGRAM_MASTER_TOKEN non configurato — bot disabilitato")
         return None
 
     app = Application.builder().token(token).build()
-
-    # Handlers
     app.add_handler(CommandHandler("start", handle_start))
     app.add_handler(CommandHandler("help", handle_start))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(handle_callback))
-
     return app
 
 
 def setup_scheduled_jobs():
-    """Configure recurring jobs (AdsWatch, MailMind, TaskBot)."""
+    """Configure recurring jobs."""
     # TaskBot — Brief mattutino ore 08:30
-    # scheduler.add_job(
-    #     task_bot_morning_brief,
-    #     "cron", hour=8, minute=30,
-    #     id="taskbot_morning", replace_existing=True,
-    # )
+    # scheduler.add_job(task_bot_morning_brief, "cron", hour=8, minute=30,
+    #     id="taskbot_morning", replace_existing=True)
 
     # MailMind — Digest serale ore 19:00
-    # scheduler.add_job(
-    #     mailmind_evening_digest,
-    #     "cron", hour=19, minute=0,
-    #     id="mailmind_digest", replace_existing=True,
-    # )
-
-    # AdsWatch — Check anomalie ogni 6 ore
-    # scheduler.add_job(
-    #     adswatch_check,
-    #     "interval", hours=6,
-    #     id="adswatch_check", replace_existing=True,
-    # )
+    # scheduler.add_job(mailmind_evening_digest, "cron", hour=19, minute=0,
+    #     id="mailmind_digest", replace_existing=True)
 
     logger.info("Scheduled jobs configurati (attualmente commentati)")
 
@@ -89,26 +75,38 @@ def setup_scheduled_jobs():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
-    global telegram_app
-
     logger.info("HERMES OS starting up...")
 
-    # Init Telegram
-    telegram_app = build_telegram_app()
-    if telegram_app:
-        await telegram_app.initialize()
-        await telegram_app.start()
+    render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
 
-        # Set webhook su Render
-        render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
+    # 1. Master bot
+    master = build_master_app()
+    if master:
+        await master.initialize()
+        await master.start()
+        bot_registry["master"] = master
+
         if render_url:
-            webhook_url = f"{render_url}/webhook/telegram"
-            await telegram_app.bot.set_webhook(url=webhook_url)
-            logger.info(f"Webhook Telegram impostato: {webhook_url}")
-        else:
-            logger.warning("RENDER_EXTERNAL_URL non impostato — webhook non configurato")
+            webhook_url = f"{render_url}/webhook/master"
+            await master.bot.set_webhook(url=webhook_url)
+            logger.info(f"Master webhook: {webhook_url}")
 
-    # Init Scheduler
+    # 2. Channel bots
+    for name in get_all_channel_names():
+        bot_app = build_channel_bot(name)
+        if bot_app:
+            await bot_app.initialize()
+            await bot_app.start()
+            bot_registry[name] = bot_app
+
+            if render_url:
+                webhook_url = f"{render_url}/webhook/{name}"
+                await bot_app.bot.set_webhook(url=webhook_url)
+                logger.info(f"{name} webhook: {webhook_url}")
+
+    logger.info(f"Bot attivi: {list(bot_registry.keys())}")
+
+    # 3. Scheduler
     setup_scheduled_jobs()
     scheduler.start()
     logger.info("APScheduler avviato")
@@ -118,16 +116,17 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("HERMES OS shutting down...")
     scheduler.shutdown(wait=False)
-    if telegram_app:
-        await telegram_app.stop()
-        await telegram_app.shutdown()
+    for name, bot_app in bot_registry.items():
+        await bot_app.stop()
+        await bot_app.shutdown()
+        logger.info(f"Bot '{name}' spento")
 
 
 # ─── FastAPI App ─────────────────────────────────────────
 app = FastAPI(
     title="HERMES OS",
     description="Sistema AI Personale Autonomo",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -138,19 +137,23 @@ async def health():
     return {
         "status": "ok",
         "system": "HERMES OS",
-        "version": "1.0.0",
-        "telegram_bot": telegram_app is not None,
+        "version": "1.1.0",
+        "active_bots": list(bot_registry.keys()),
         "scheduler_running": scheduler.running if scheduler else False,
     }
 
 
-@app.post("/webhook/telegram")
-async def telegram_webhook(request: Request):
-    """Riceve update da Telegram via webhook."""
-    if not telegram_app:
-        return Response(status_code=503, content="Bot non inizializzato")
+@app.post("/webhook/{bot_name}")
+async def telegram_webhook(bot_name: str, request: Request):
+    """Riceve update da Telegram via webhook — routing per bot name."""
+    # Retrocompatibilità: /webhook/telegram → master
+    effective_name = "master" if bot_name == "telegram" else bot_name
+
+    bot_app = bot_registry.get(effective_name)
+    if not bot_app:
+        return Response(status_code=404, content=f"Bot '{effective_name}' non trovato")
 
     data = await request.json()
-    update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.process_update(update)
+    update = Update.de_json(data, bot_app.bot)
+    await bot_app.process_update(update)
     return Response(status_code=200)

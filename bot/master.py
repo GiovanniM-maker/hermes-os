@@ -280,10 +280,12 @@ async def _handle_task_request(user_text: str, bot=None) -> str:
 
 async def _handle_code_request(user_text: str, bot=None) -> str:
     """Smista a CodeForge."""
-    return (
-        "\U0001f4bb CodeForge \u2014 Coming Soon\n"
-        "Il generatore di codice/landing sar\u00e0 attivato nell'ultima fase di build."
-    )
+    from agents.code_forge.orchestrator import handle_request
+    try:
+        return await handle_request(user_text, bot)
+    except Exception as e:
+        logger.error(f"CodeForge error: {e}")
+        return f"\u26a0\ufe0f Errore CodeForge: {str(e)[:300]}"
 
 
 async def _handle_complex_project(user_text: str, bot=None) -> str:
@@ -309,9 +311,9 @@ async def _handle_system_command(user_text: str) -> str:
             "\u2705 Question Engine: online\n"
             "\u2705 PipelineForge: online\n"
             "\u2705 TaskBot: online\n"
-            "\u23f8\ufe0f MailMind: in attesa (Gmail OAuth)\n"
-            "\u23f8\ufe0f AdsWatch: in attesa\n"
-            "\u23f8\ufe0f CodeForge: in attesa\n"
+            "\u2705 MailMind: online (n8n webhooks)\n"
+            "\u2705 CodeForge: online\n"
+            "\u23f8\ufe0f AdsWatch: in attesa (Google Ads + Meta)\n"
         )
 
     return "\U0001f916 Comando di sistema non riconosciuto. Prova /help"
