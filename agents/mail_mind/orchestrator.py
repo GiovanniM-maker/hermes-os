@@ -720,6 +720,7 @@ async def setup_n8n_workflows() -> str:
 async def scheduled_morning_digest():
     """Chiamato ogni mattina alle 09:00 da APScheduler."""
     from telegram import Bot as TgBot
+    from bot.telegram_utils import _split_text, TG_MAX_LENGTH
 
     if not config.TELEGRAM_MAIL_TOKEN and not config.TELEGRAM_MASTER_TOKEN:
         logger.warning("MailMind scheduled: nessun token bot configurato")
@@ -731,7 +732,9 @@ async def scheduled_morning_digest():
 
     try:
         digest = await run_email_analysis(bot)
-        await bot.send_message(chat_id=config.TELEGRAM_CHAT_ID, text=digest)
+        # Split per rispettare il limite Telegram 4096 chars
+        for chunk in _split_text(digest, TG_MAX_LENGTH):
+            await bot.send_message(chat_id=config.TELEGRAM_CHAT_ID, text=chunk)
         logger.info("MailMind: digest mattutino inviato")
     except Exception as e:
         logger.error(f"MailMind scheduled digest error: {e}")

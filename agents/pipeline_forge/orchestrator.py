@@ -6,6 +6,7 @@ testa e deploya workflow n8n autonomamente.
 Sub-Agents: Clarifier → Architect → Builder → Tester → Debugger → Deployer
 """
 
+import asyncio
 import json
 import logging
 
@@ -34,6 +35,25 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
     # ─── Pre-check: domande informative/meta ──────────────
     if await _is_meta_query(user_text):
         return await _handle_meta(user_text)
+
+    # Timeout globale per evitare blocchi infiniti (3 min)
+    try:
+        return await asyncio.wait_for(
+            _run_pipeline(user_text, bot), timeout=180
+        )
+    except asyncio.TimeoutError:
+        logger.error("PipelineForge: timeout (180s)")
+        return (
+            "\u26a0\ufe0f PipelineForge: timeout — la generazione ha impiegato troppo.\n"
+            "Riprova con una richiesta piu' specifica."
+        )
+    except Exception as e:
+        logger.error(f"PipelineForge handle_request error: {e}")
+        return f"\u26a0\ufe0f PipelineForge: errore — {str(e)[:300]}"
+
+
+async def _run_pipeline(user_text: str, bot: Bot | None = None) -> str:
+    """Pipeline completa: Clarifier → Architect → Builder → Tester → Deployer."""
 
     # ─── Step 1: Clarifier ───────────────────────────────
     clarification = await _clarify(user_text, bot)
@@ -73,6 +93,8 @@ _META_KEYWORDS = (
     "cosa fai", "chi sei", "come funzioni", "help", "aiuto",
     "cosa puoi fare", "che sai fare", "presentati", "info",
     "cosa sai", "come ti uso", "istruzioni",
+    "potresti", "puoi fare", "sei capace", "sai fare",
+    "riesci a", "funzionalità", "capacità",
 )
 
 
@@ -83,6 +105,12 @@ async def _is_meta_query(user_text: str) -> bool:
         return True
     # Messaggi troppo corti per essere specifiche di workflow
     if len(text_lower) < 15 and "?" in text_lower:
+        return True
+    # Domande esplorative con "?" che non contengono verbi d'azione concreti
+    if "?" in text_lower and not any(v in text_lower for v in (
+        "crea ", "genera ", "costruisci ", "fai un workflow",
+        "automatizza ", "connetti ", "integra ",
+    )):
         return True
     return False
 
