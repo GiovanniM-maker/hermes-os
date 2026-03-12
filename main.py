@@ -18,6 +18,7 @@ from telegram.ext import (
     filters,
 )
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 import config
 from bot.master import (
@@ -60,23 +61,27 @@ def build_master_app() -> Application | None:
 
 
 def setup_scheduled_jobs():
-    """Configure recurring jobs."""
+    """Configure recurring jobs — timezone Europe/Rome."""
     from agents.task_bot.orchestrator import scheduled_morning_brief
     from agents.mail_mind.orchestrator import scheduled_morning_digest
 
-    # TaskBot — Brief mattutino ore 08:30
+    tz = "Europe/Rome"
+
+    # TaskBot — Brief mattutino ore 08:30 (ora italiana)
     scheduler.add_job(
-        scheduled_morning_brief, "cron", hour=8, minute=30,
+        scheduled_morning_brief,
+        CronTrigger(hour=8, minute=30, timezone=tz),
         id="taskbot_morning", replace_existing=True,
     )
-    logger.info("Scheduled: TaskBot brief mattutino @ 08:30")
+    logger.info("Scheduled: TaskBot brief mattutino @ 08:30 Europe/Rome")
 
-    # MailMind — Digest mattutino ore 09:00
+    # MailMind — Digest mattutino ore 09:00 (ora italiana)
     scheduler.add_job(
-        scheduled_morning_digest, "cron", hour=9, minute=0,
+        scheduled_morning_digest,
+        CronTrigger(hour=9, minute=0, timezone=tz),
         id="mailmind_digest", replace_existing=True,
     )
-    logger.info("Scheduled: MailMind digest @ 09:00")
+    logger.info("Scheduled: MailMind digest @ 09:00 Europe/Rome")
 
 
 # ─── FastAPI Lifespan ────────────────────────────────────
@@ -150,6 +155,34 @@ async def health():
         "scheduler_running": scheduler.running if scheduler else False,
     }
 
+
+# ─── Trigger Endpoints (per cron esterno / keep-alive) ────
+
+@app.post("/trigger/digest")
+async def trigger_digest():
+    """Trigger manuale digest email — usabile da cron esterno (es. cron-job.org)."""
+    from agents.mail_mind.orchestrator import scheduled_morning_digest
+    asyncio.create_task(scheduled_morning_digest())
+    logger.info("Trigger manuale: MailMind digest")
+    return {"status": "triggered", "job": "mailmind_digest"}
+
+
+@app.post("/trigger/brief")
+async def trigger_brief():
+    """Trigger manuale brief mattutino — usabile da cron esterno."""
+    from agents.task_bot.orchestrator import scheduled_morning_brief
+    asyncio.create_task(scheduled_morning_brief())
+    logger.info("Trigger manuale: TaskBot brief")
+    return {"status": "triggered", "job": "taskbot_brief"}
+
+
+@app.get("/keepalive")
+async def keepalive():
+    """Endpoint keep-alive per impedire a Render free tier di dormire."""
+    return {"status": "awake"}
+
+
+# ─── Telegram Webhooks ────────────────────────────────────
 
 @app.post("/webhook/{bot_name}")
 async def telegram_webhook(bot_name: str, request: Request):

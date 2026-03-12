@@ -25,6 +25,7 @@ from core.llm_router import chat, TaskComplexity
 from core.question_engine import ask_questions
 from core import memory
 from core import knowledge_base as kb
+from core import gmail_client
 from agents.pipeline_forge.n8n_client import import_workflow, call_webhook
 
 logger = logging.getLogger("hermes.mailmind")
@@ -165,7 +166,17 @@ async def run_email_analysis(bot: Bot | None = None) -> str:
 # ─── Sub-Agent: Reader ────────────────────────────────────
 
 async def _fetch_emails() -> list[dict]:
-    """Fetcha email non lette via n8n webhook."""
+    """Fetcha email non lette — prima via Gmail API diretto, fallback n8n."""
+    # Metodo primario: Gmail API diretta (no dipendenza n8n)
+    try:
+        emails = await gmail_client.fetch_unread_emails(max_results=20)
+        if emails is not None:
+            logger.info(f"Reader: {len(emails)} email fetchate via Gmail API")
+            return emails
+    except Exception as e:
+        logger.warning(f"Reader: Gmail API fallito ({e}), provo n8n...")
+
+    # Fallback: n8n webhook
     result = await call_webhook("hermes-mail-fetch", {})
 
     # n8n ritorna lista di email o singolo oggetto
@@ -184,7 +195,7 @@ async def _fetch_emails() -> list[dict]:
             "labels": raw.get("labelIds", []),
         })
 
-    logger.info(f"Reader: {len(emails)} email fetchate")
+    logger.info(f"Reader: {len(emails)} email fetchate via n8n")
     return emails
 
 
@@ -456,7 +467,14 @@ async def _execute_actions(user_text: str, bot: Bot | None = None) -> str:
 
 
 async def _archive_email(message_id: str):
-    """Archivia email via n8n webhook."""
+    """Archivia email — prima Gmail API diretto, fallback n8n."""
+    try:
+        ok = await gmail_client.archive_email(message_id)
+        if ok:
+            return
+    except Exception as e:
+        logger.warning(f"Archive via Gmail API fallito ({e}), provo n8n...")
+
     try:
         await call_webhook("hermes-mail-archive", {"message_id": message_id})
     except Exception as e:
@@ -505,18 +523,26 @@ async def _handle_reply(user_text: str, bot: Bot | None = None) -> str:
     if not email:
         return f"\u26a0\ufe0f Email #{num} non trovata nel digest corrente."
 
-    # Invia via n8n
-    try:
-        sender_email = email["from"]
-        email_match = re.search(r"<(.+?)>", sender_email)
-        to_addr = email_match.group(1) if email_match else sender_email
+    # Invia — prima Gmail API diretto, fallback n8n
+    sender_email = email["from"]
+    email_match = re.search(r"<(.+?)>", sender_email)
+    to_addr = email_match.group(1) if email_match else sender_email
+    subject = f"Re: {email['subject']}"
 
+    try:
+        ok = await gmail_client.send_email(to_addr, subject, reply_text)
+        if ok:
+            return f"\u2705 Risposta inviata a {to_addr}\nOggetto: {subject}"
+    except Exception:
+        pass
+
+    try:
         await call_webhook("hermes-mail-send", {
             "to": to_addr,
-            "subject": f"Re: {email['subject']}",
+            "subject": subject,
             "body": reply_text,
         })
-        return f"\u2705 Risposta inviata a {to_addr}\nOggetto: Re: {email['subject']}"
+        return f"\u2705 Risposta inviata a {to_addr}\nOggetto: {subject}"
     except Exception as e:
         return f"\u26a0\ufe0f Errore invio risposta: {str(e)[:200]}"
 
@@ -763,12 +789,16 @@ async def setup_n8n_workflows() -> str:
 # ─── Scheduled Digest (chiamato da APScheduler) ──────────
 
 async def scheduled_morning_digest():
-    """Chiamato ogni mattina alle 09:00 da APScheduler."""
+    """Chiamato ogni mattina alle 09:00 da APScheduler o via trigger HTTP."""
     from telegram import Bot as TgBot
     from bot.telegram_utils import _split_text, TG_MAX_LENGTH
 
     if not config.TELEGRAM_MAIL_TOKEN and not config.TELEGRAM_MASTER_TOKEN:
         logger.warning("MailMind scheduled: nessun token bot configurato")
+        return
+
+    if not config.TELEGRAM_CHAT_ID:
+        logger.warning("MailMind scheduled: TELEGRAM_CHAT_ID non configurato")
         return
 
     # Usa il mail bot se disponibile, altrimenti master
@@ -777,9 +807,16 @@ async def scheduled_morning_digest():
 
     try:
         digest = await run_email_analysis(bot)
-        # Split per rispettare il limite Telegram 4096 chars
         for chunk in _split_text(digest, TG_MAX_LENGTH):
             await bot.send_message(chat_id=config.TELEGRAM_CHAT_ID, text=chunk)
         logger.info("MailMind: digest mattutino inviato")
     except Exception as e:
         logger.error(f"MailMind scheduled digest error: {e}")
+        # Notifica errore a Juan su Telegram
+        try:
+            await bot.send_message(
+                chat_id=config.TELEGRAM_CHAT_ID,
+                text=f"\u26a0\ufe0f MailMind \u2014 Errore digest schedulato:\n{str(e)[:300]}",
+            )
+        except Exception:
+            pass
