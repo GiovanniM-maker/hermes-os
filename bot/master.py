@@ -42,7 +42,8 @@ _KEYWORD_ROUTES: list[tuple[list[str], str]] = [
      "task_mgmt"),
     (["genera codice", "landing page", "codeforge", "scrivi codice"],
      "code_request"),
-    (["/status", "stato sistema", "system status"],
+    (["/status", "stato sistema", "system status", "configura scheduler",
+      "setup scheduler"],
      "system_command"),
     (["ads ", "campagna", "adswatch", "meta ads", "google ads"],
      "ads_question"),
@@ -310,6 +311,10 @@ async def _handle_complex_project(user_text: str, bot=None) -> str:
 async def _handle_system_command(user_text: str) -> str:
     """Gestisce comandi di sistema."""
     text_lower = user_text.lower()
+
+    if "configura scheduler" in text_lower or "setup scheduler" in text_lower:
+        from core.scheduler_setup import setup_n8n_schedulers
+        return await setup_n8n_schedulers()
 
     if "status" in text_lower:
         return (
