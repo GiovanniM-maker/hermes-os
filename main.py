@@ -199,6 +199,26 @@ async def keepalive():
     return {"status": "awake"}
 
 
+@app.get("/config-check")
+async def config_check():
+    """Diagnostica: mostra quali env vars sono configurate (senza valori)."""
+    from core import gcal_client as gc
+    return {
+        "telegram_master_token": bool(config.TELEGRAM_MASTER_TOKEN),
+        "telegram_chat_id": bool(config.TELEGRAM_CHAT_ID),
+        "telegram_chat_id_value": config.TELEGRAM_CHAT_ID[:4] + "..." if config.TELEGRAM_CHAT_ID else "",
+        "openrouter_api_key": bool(config.OPENROUTER_API_KEY),
+        "gmail_client_id": bool(config.GMAIL_CLIENT_ID),
+        "gmail_client_secret": bool(config.GMAIL_CLIENT_SECRET),
+        "gmail_refresh_token": bool(config.GMAIL_REFRESH_TOKEN),
+        "gcal_configured": gc.is_configured(),
+        "n8n_base_url": bool(config.N8N_BASE_URL),
+        "n8n_api_key": bool(config.N8N_API_KEY),
+        "groq_api_key": bool(config.GROQ_API_KEY),
+        "google_drive_folder": bool(config.HERMES_DRIVE_FOLDER_ID),
+    }
+
+
 # ─── Telegram Webhooks ────────────────────────────────────
 
 @app.post("/webhook/{bot_name}")

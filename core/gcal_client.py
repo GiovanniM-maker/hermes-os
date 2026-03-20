@@ -15,6 +15,12 @@ import config
 logger = logging.getLogger("hermes.gcal")
 
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
+
+
+def is_configured() -> bool:
+    """Check se le credenziali Google Calendar sono presenti."""
+    refresh = config.GCAL_REFRESH_TOKEN or config.GMAIL_REFRESH_TOKEN
+    return bool(config.GMAIL_CLIENT_ID and config.GMAIL_CLIENT_SECRET and refresh)
 _GCAL_API = "https://www.googleapis.com/calendar/v3"
 _TZ = ZoneInfo("Europe/Rome")
 

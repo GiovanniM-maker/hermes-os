@@ -69,6 +69,15 @@ async def handle_request(user_text: str, bot: Bot | None = None) -> str:
 
     # ─── Calendario (priorità alta — check keyword) ───────
     if _is_calendar_request(text_lower):
+        if not gcal_client.is_configured():
+            return (
+                "\u26a0\ufe0f Calendario non configurato.\n"
+                "Servono le env vars su Render:\n"
+                "- GMAIL_CLIENT_ID\n"
+                "- GMAIL_CLIENT_SECRET\n"
+                "- GMAIL_REFRESH_TOKEN\n\n"
+                "Configurale e riprova."
+            )
         return await _handle_calendar(user_text)
 
     # ─── Comandi task espliciti ───────────────────────────
@@ -513,9 +522,13 @@ async def _evening_program() -> str:
     now = datetime.now(_TZ)
     tomorrow = now + timedelta(days=1)
 
-    # Fetch eventi
-    tomorrow_events = await gcal_client.get_tomorrow_events()
-    week_events = await gcal_client.get_week_events()
+    # Fetch eventi (graceful se non configurato)
+    if gcal_client.is_configured():
+        tomorrow_events = await gcal_client.get_tomorrow_events()
+        week_events = await gcal_client.get_week_events()
+    else:
+        tomorrow_events = []
+        week_events = []
 
     # Prepara dati per LLM
     tomorrow_label = _format_date_it(tomorrow)
@@ -730,11 +743,13 @@ async def _morning_brief() -> str:
     """Genera il brief mattutino con task + calendario di oggi."""
     pending = [t for t in _tasks if t["status"] == "pending"]
 
-    # Fetch eventi di oggi
-    try:
-        today_events = await gcal_client.get_events_for_date(datetime.now(_TZ))
-    except Exception:
-        today_events = []
+    # Fetch eventi di oggi (graceful se non configurato)
+    today_events = []
+    if gcal_client.is_configured():
+        try:
+            today_events = await gcal_client.get_events_for_date(datetime.now(_TZ))
+        except Exception as e:
+            logger.warning(f"Brief: errore fetch calendario: {e}")
 
     lines = [
         "\u2600\ufe0f HERMES — Buongiorno Juan",
