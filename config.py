@@ -50,10 +50,13 @@ def get_drive_credentials() -> dict | None:
 N8N_BASE_URL = os.environ.get("N8N_BASE_URL", "")
 N8N_API_KEY = os.environ.get("N8N_API_KEY", "")
 
-# ─── Gmail (MailMind — fase futura) ──────────────────────
+# ─── Gmail (MailMind) + Google Calendar (TaskBot) ────────
 GMAIL_CLIENT_ID = os.environ.get("GMAIL_CLIENT_ID", "")
 GMAIL_CLIENT_SECRET = os.environ.get("GMAIL_CLIENT_SECRET", "")
 GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "")
+# Calendar: se non specificato, usa lo stesso refresh token di Gmail
+GCAL_REFRESH_TOKEN = os.environ.get("GCAL_REFRESH_TOKEN", "")
+GOOGLE_CALENDAR_ID = os.environ.get("GOOGLE_CALENDAR_ID", "primary")
 
 # ─── Groq / Whisper (trascrizione audio) ─────────────────
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")

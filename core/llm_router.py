@@ -110,11 +110,13 @@ async def classify_intent(user_message: str) -> dict:
 - pipeline_request: richiesta di creare/modificare workflow n8n o automazioni
 - ads_question: domanda su campagne pubblicitarie, performance ads, metriche
 - mail_task: gestione email, risposte, draft, digest
-- task_mgmt: gestione task, to-do, priorita', brief
+- task_mgmt: gestione task, to-do, priorita', brief, CALENDARIO, agenda, impegni, appuntamenti, riunioni, "cosa ho domani", eventi
 - code_request: generazione codice, landing page, script, app
 - complex_project: progetto che richiede piu' agenti (es. "crea campagna completa")
 - general_question: domanda generica, conversazione, info
 - system_command: comandi di sistema (status, help, config)
+
+IMPORTANTE: tutto cio' che riguarda calendario, agenda, impegni, appuntamenti, riunioni, meeting va in task_mgmt.
 
 Rispondi SOLO in JSON con: {"intent": "...", "confidence": 0.0-1.0, "details": "breve spiegazione"}"""
 

@@ -62,7 +62,7 @@ def build_master_app() -> Application | None:
 
 def setup_scheduled_jobs():
     """Configure recurring jobs — timezone Europe/Rome."""
-    from agents.task_bot.orchestrator import scheduled_morning_brief
+    from agents.task_bot.orchestrator import scheduled_morning_brief, scheduled_evening_program
     from agents.mail_mind.orchestrator import scheduled_morning_digest
 
     tz = "Europe/Rome"
@@ -82,6 +82,14 @@ def setup_scheduled_jobs():
         id="mailmind_digest", replace_existing=True,
     )
     logger.info("Scheduled: MailMind digest @ 09:00 Europe/Rome")
+
+    # TaskBot — Programma serale ore 21:00 (ora italiana)
+    scheduler.add_job(
+        scheduled_evening_program,
+        CronTrigger(hour=21, minute=0, timezone=tz),
+        id="taskbot_evening", replace_existing=True,
+    )
+    logger.info("Scheduled: TaskBot programma serale @ 21:00 Europe/Rome")
 
 
 # ─── FastAPI Lifespan ────────────────────────────────────
@@ -174,6 +182,15 @@ async def trigger_brief():
     asyncio.create_task(scheduled_morning_brief())
     logger.info("Trigger manuale: TaskBot brief")
     return {"status": "triggered", "job": "taskbot_brief"}
+
+
+@app.post("/trigger/evening")
+async def trigger_evening():
+    """Trigger manuale programma serale — usabile da cron esterno."""
+    from agents.task_bot.orchestrator import scheduled_evening_program
+    asyncio.create_task(scheduled_evening_program())
+    logger.info("Trigger manuale: TaskBot programma serale")
+    return {"status": "triggered", "job": "taskbot_evening"}
 
 
 @app.get("/keepalive")
