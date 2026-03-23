@@ -15,6 +15,13 @@ TELEGRAM_TASKS_TOKEN = os.environ.get("TELEGRAM_TASKS_TOKEN", "")
 TELEGRAM_BUILD_TOKEN = os.environ.get("TELEGRAM_BUILD_TOKEN", "")
 TELEGRAM_ADS_TOKEN = os.environ.get("TELEGRAM_ADS_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+# Lista chat_id autorizzati (comma-separated). Include sempre TELEGRAM_CHAT_ID.
+_allowed_raw = os.environ.get("TELEGRAM_ALLOWED_IDS", "")
+TELEGRAM_ALLOWED_IDS: set[str] = {
+    cid.strip() for cid in _allowed_raw.split(",") if cid.strip()
+}
+if TELEGRAM_CHAT_ID:
+    TELEGRAM_ALLOWED_IDS.add(TELEGRAM_CHAT_ID)
 
 # ─── LLM — OpenRouter (gateway unico per Claude + Gemini) ──
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")

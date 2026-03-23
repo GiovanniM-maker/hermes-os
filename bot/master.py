@@ -96,7 +96,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.message.chat_id)
 
     # Verifica che il messaggio sia da Juan
-    if chat_id != config.TELEGRAM_CHAT_ID:
+    if chat_id not in config.TELEGRAM_ALLOWED_IDS:
         logger.warning(f"Messaggio da chat_id non autorizzato: {chat_id}")
         await update.message.reply_text("\u26d4 Non sei autorizzato a usare questo bot.")
         return
@@ -119,7 +119,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     chat_id = str(update.message.chat_id)
-    if chat_id != config.TELEGRAM_CHAT_ID:
+    if chat_id not in config.TELEGRAM_ALLOWED_IDS:
         await update.message.reply_text("\u26d4 Non sei autorizzato.")
         return
 
