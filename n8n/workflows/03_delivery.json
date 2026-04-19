@@ -66,7 +66,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Aggregate delivery status across all sent messages\nconst items = $input.all();\nlet ok=0, fail=0;\nfor (const it of items){\n  if (it.json && it.json.error) fail++; else ok++;\n}\nconst first = items[0]?.json || {};\nconst status = fail === 0 ? 'delivered' : (ok > 0 ? 'partial' : 'delivery_failed');\nconst meta = first.meta || {};\nconst started_at = first.started_at || new Date().toISOString();\nconst ended_at = new Date().toISOString();\nreturn [{ json: {\n  spreadsheetId: '1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk',\n  range: 'run_logs!A:L',\n  values: [[\n    first.run_id || 'unknown',\n    (new Date()).toISOString().slice(0,10),\n    first.mode || 'UNKNOWN',\n    meta.sources_total || 0,\n    meta.sources_failed || 0,\n    meta.raw_items_count || 0,\n    meta.deduped_count || 0,\n    meta.selected_count || 0,\n    status,\n    `ok=${ok} fail=${fail} packages=${first.packages_count||0}`,\n    started_at,\n    ended_at\n  ]],\n  telegram_status: status\n}}];"
+        "jsCode": "// Aggregate delivery status across all sent messages and emit a single row\n// with column keys matching the run_logs schema (autoMap-friendly).\nconst items = $input.all();\nlet ok=0, fail=0;\nfor (const it of items){\n  if (it.json && it.json.error) fail++; else ok++;\n}\nconst first = items[0]?.json || {};\nconst status = fail === 0 ? 'delivered' : (ok > 0 ? 'partial' : 'delivery_failed');\nconst meta = first.meta || {};\nconst started_at = first.started_at || new Date().toISOString();\nconst ended_at = new Date().toISOString();\nreturn [{ json: {\n  run_id: first.run_id || 'unknown',\n  run_date: (new Date()).toISOString().slice(0,10),\n  mode: first.mode || 'UNKNOWN',\n  sources_total: meta.sources_total || 0,\n  sources_failed: meta.sources_failed || 0,\n  raw_items_count: meta.raw_items_count || 0,\n  deduped_count: meta.deduped_count || 0,\n  selected_count: meta.selected_count || 0,\n  telegram_status: status,\n  notes: `ok=${ok} fail=${fail} packages=${first.packages_count||0}`,\n  started_at,\n  ended_at\n}}];"
       },
       "id": "agg",
       "name": "Aggregate Status",
@@ -76,26 +76,32 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.range) }}:append",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleApi",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "valueInputOption", "value": "USER_ENTERED" },
-            { "name": "insertDataOption", "value": "INSERT_ROWS" }
-          ]
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
         },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ range: $json.range, majorDimension: 'ROWS', values: $json.values }) }}",
+        "sheetName": {
+          "__rl": true,
+          "value": "run_logs",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
         "options": {}
       },
       "id": "log-run",
       "name": "Append run_logs",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
       "position": [1200, 0],
       "credentials": {
         "googleApi": {

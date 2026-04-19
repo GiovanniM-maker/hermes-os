@@ -16,104 +16,231 @@
       "name": "Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 0],
+      "position": [
+        0,
+        0
+      ],
       "webhookId": "a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d"
     },
     {
       "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "a1",
-              "name": "spreadsheetId",
-              "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
-              "type": "string"
-            }
-          ]
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "create",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
         },
+        "title": "source_registry",
         "options": {}
       },
-      "id": "set-config",
-      "name": "Config",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [240, 0]
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleApi",
-        "options": {}
-      },
-      "id": "http-get-ss",
-      "name": "Get Spreadsheet",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [480, 0],
+      "id": "create-srcreg",
+      "name": "Create source_registry",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        240,
+        0
+      ],
       "credentials": {
         "googleApi": {
           "id": "VjDfIwHmyAdswLjT",
           "name": "Google Sheets account"
         }
-      }
+      },
+      "alwaysOutputData": true
     },
     {
       "parameters": {
-        "jsCode": "// Plan the sheets we need\nconst spreadsheetId = $('Config').first().json.spreadsheetId;\nconst existing = ($json.sheets || []).map(s => s.properties.title);\n\nconst REQUIRED = {\n  source_registry: ['source_id','name','url','type','tier','enabled','topic_scope','trust_score','notes'],\n  fallback_library: ['fallback_id','category','title','angle','target','priority','enabled'],\n  run_logs: ['run_id','run_date','mode','sources_total','sources_failed','raw_items_count','deduped_count','selected_count','telegram_status','notes','started_at','ended_at'],\n  ranked_items_history: ['run_id','item_id','title','url','source_name','published_at','primary_topic','candidate_score','publishable_score','confidence','selected_yes_no','selection_reason'],\n  content_history: ['content_id','run_id','item_id','mode','platform_pair','status','confidence_label','instagram_hook','instagram_script','instagram_caption','instagram_cta','linkedin_post','source_name','source_url','prompt_version'],\n  publication_feedback: ['content_id','published_yes_no','published_date','platform','views','likes','comments','saves','notes']\n};\n\nconst missing = Object.keys(REQUIRED).filter(t => !existing.includes(t));\nconst addRequests = missing.map(title => ({ addSheet: { properties: { title } } }));\n\n// Source registry seed\nconst SOURCE_ROWS = [\n  ['src_openai','OpenAI News','https://openai.com/news/rss.xml','rss','tier1','true','generative_ai|business_ai','0.95','Official'],\n  ['src_anthropic','Anthropic News','https://www.anthropic.com/news','html','tier1','true','generative_ai|business_ai','0.95','Official – HTML scrape'],\n  ['src_google_ai','Google AI Blog','https://blog.google/technology/ai/rss/','rss','tier1','true','generative_ai|business_ai','0.9','Official'],\n  ['src_deepmind','Google DeepMind Blog','https://deepmind.google/blog/rss.xml','rss','tier1','true','generative_ai','0.9','Official'],\n  ['src_hf','Hugging Face Blog','https://huggingface.co/blog/feed.xml','rss','tier1','true','generative_ai','0.85','Official'],\n  ['src_ms_ai','Microsoft AI Blog','https://blogs.microsoft.com/ai/feed/','rss','tier1','true','business_ai','0.85','Official'],\n  ['src_meta_ai','Meta AI Blog','https://ai.meta.com/blog/rss/','rss','tier1','true','generative_ai','0.85','Official'],\n  ['src_nvidia','NVIDIA Blog','https://blogs.nvidia.com/feed/','rss','tier1','true','generative_ai','0.8','Official'],\n  ['src_mistral','Mistral AI News','https://mistral.ai/news/','html','tier1','true','generative_ai','0.8','Official – HTML'],\n  ['src_techcrunch_ai','TechCrunch AI','https://techcrunch.com/category/artificial-intelligence/feed/','rss','tier2','true','business_ai','0.75','Trusted media'],\n  ['src_venturebeat','VentureBeat AI','https://venturebeat.com/category/ai/feed/','rss','tier2','true','business_ai','0.75','Trusted media'],\n  ['src_the_decoder','The Decoder','https://the-decoder.com/feed/','rss','tier2','true','generative_ai|business_ai','0.7','Trusted media'],\n  ['src_theverge_ai','The Verge AI','https://www.theverge.com/rss/ai-artificial-intelligence/index.xml','rss','tier2','true','generative_ai|business_ai','0.7','Trusted media'],\n  ['src_mit_tech','MIT Tech Review AI','https://www.technologyreview.com/feed/','rss','tier2','true','generative_ai|business_ai','0.8','Trusted media']\n];\n\n// Fallback library seed\nconst FALLBACK_ROWS = [\n  ['fb_001','evergreen','Come capire se una news AI conta davvero per un business','Framework valutativo per filtrare segnale vs rumore','sme|entrepreneur','high','true'],\n  ['fb_002','evergreen','3 segnali per distinguere hype da impatto reale','Checklist anti-hype per decisori','entrepreneur|solo_pro','high','true'],\n  ['fb_003','practical','Dove l\\u2019AI sta gi\\u00e0 facendo risparmiare tempo alle PMI','Casi operativi concreti','sme','high','true'],\n  ['fb_004','practical','Cosa guardare davvero quando esce un nuovo tool AI','Criteri di valutazione veloci','solo_pro|sme','medium','true'],\n  ['fb_005','practical','Gli errori pi\\u00f9 comuni quando si prova a usare l\\u2019AI in azienda','Anti-pattern da evitare','sme|entrepreneur','high','true'],\n  ['fb_006','trend','Perch\\u00e9 molte novit\\u00e0 AI non cambiano nulla nel lavoro quotidiano','Punto di vista critico ma costruttivo','entrepreneur|solo_pro','medium','true'],\n  ['fb_007','practical','Come trasformare una novit\\u00e0 AI in vantaggio operativo concreto','Metodo step-by-step','sme|solo_pro','high','true']\n];\n\nreturn [{\n  json: {\n    spreadsheetId,\n    missingSheets: missing,\n    addRequests,\n    headers: REQUIRED,\n    seeds: {\n      source_registry: SOURCE_ROWS,\n      fallback_library: FALLBACK_ROWS\n    }\n  }\n}];"
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "create",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
+        },
+        "title": "fallback_library",
+        "options": {}
       },
-      "id": "plan-sheets",
-      "name": "Plan Sheets",
+      "id": "create-fb",
+      "name": "Create fallback_library",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        480,
+        0
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VjDfIwHmyAdswLjT",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "create",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
+        },
+        "title": "run_logs",
+        "options": {}
+      },
+      "id": "create-logs",
+      "name": "Create run_logs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VjDfIwHmyAdswLjT",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "create",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
+        },
+        "title": "ranked_items_history",
+        "options": {}
+      },
+      "id": "create-ranked",
+      "name": "Create ranked_items_history",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        960,
+        0
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VjDfIwHmyAdswLjT",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "create",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
+        },
+        "title": "content_history",
+        "options": {}
+      },
+      "id": "create-content",
+      "name": "Create content_history",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1200,
+        0
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VjDfIwHmyAdswLjT",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "create",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
+        },
+        "title": "publication_feedback",
+        "options": {}
+      },
+      "id": "create-feedback",
+      "name": "Create publication_feedback",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1440,
+        0
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VjDfIwHmyAdswLjT",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Emit seed items for source_registry \u2014 each item becomes a row; keys become headers on first write.\nconst rows = [\n  { source_id:'src_openai',       name:'OpenAI News',          url:'https://openai.com/news/rss.xml',                         type:'rss',  tier:'tier1', enabled:'true', topic_scope:'generative_ai|business_ai', trust_score:0.95, notes:'Official' },\n  { source_id:'src_anthropic',    name:'Anthropic News',       url:'https://www.anthropic.com/news',                           type:'html', tier:'tier1', enabled:'true', topic_scope:'generative_ai|business_ai', trust_score:0.95, notes:'Official \u2013 HTML scrape' },\n  { source_id:'src_google_ai',    name:'Google AI Blog',       url:'https://blog.google/technology/ai/rss/',                  type:'rss',  tier:'tier1', enabled:'true', topic_scope:'generative_ai|business_ai', trust_score:0.9,  notes:'Official' },\n  { source_id:'src_deepmind',     name:'Google DeepMind Blog', url:'https://deepmind.google/blog/rss.xml',                    type:'rss',  tier:'tier1', enabled:'true', topic_scope:'generative_ai',              trust_score:0.9,  notes:'Official' },\n  { source_id:'src_hf',           name:'Hugging Face Blog',    url:'https://huggingface.co/blog/feed.xml',                    type:'rss',  tier:'tier1', enabled:'true', topic_scope:'generative_ai',              trust_score:0.85, notes:'Official' },\n  { source_id:'src_ms_ai',        name:'Microsoft AI Blog',    url:'https://blogs.microsoft.com/ai/feed/',                    type:'rss',  tier:'tier1', enabled:'true', topic_scope:'business_ai',                trust_score:0.85, notes:'Official' },\n  { source_id:'src_meta_ai',      name:'Meta AI Blog',         url:'https://ai.meta.com/blog/rss/',                           type:'rss',  tier:'tier1', enabled:'true', topic_scope:'generative_ai',              trust_score:0.85, notes:'Official' },\n  { source_id:'src_nvidia',       name:'NVIDIA Blog',          url:'https://blogs.nvidia.com/feed/',                          type:'rss',  tier:'tier1', enabled:'true', topic_scope:'generative_ai',              trust_score:0.8,  notes:'Official' },\n  { source_id:'src_mistral',      name:'Mistral AI News',      url:'https://mistral.ai/news/',                                type:'html', tier:'tier1', enabled:'true', topic_scope:'generative_ai',              trust_score:0.8,  notes:'Official \u2013 HTML' },\n  { source_id:'src_techcrunch_ai',name:'TechCrunch AI',        url:'https://techcrunch.com/category/artificial-intelligence/feed/', type:'rss',  tier:'tier2', enabled:'true', topic_scope:'business_ai',           trust_score:0.75, notes:'Trusted media' },\n  { source_id:'src_venturebeat',  name:'VentureBeat AI',       url:'https://venturebeat.com/category/ai/feed/',               type:'rss',  tier:'tier2', enabled:'true', topic_scope:'business_ai',                trust_score:0.75, notes:'Trusted media' },\n  { source_id:'src_the_decoder',  name:'The Decoder',          url:'https://the-decoder.com/feed/',                           type:'rss',  tier:'tier2', enabled:'true', topic_scope:'generative_ai|business_ai', trust_score:0.7,  notes:'Trusted media' },\n  { source_id:'src_theverge_ai',  name:'The Verge AI',         url:'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', type:'rss',  tier:'tier2', enabled:'true', topic_scope:'generative_ai|business_ai', trust_score:0.7,  notes:'Trusted media' },\n  { source_id:'src_mit_tech',     name:'MIT Tech Review AI',   url:'https://www.technologyreview.com/feed/',                  type:'rss',  tier:'tier2', enabled:'true', topic_scope:'generative_ai|business_ai', trust_score:0.8,  notes:'Trusted media' }\n];\nreturn rows.map(r => ({ json: r }));"
+      },
+      "id": "seed-sources",
+      "name": "Seed source_registry items",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [720, 0]
+      "position": [
+        1680,
+        120
+      ]
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
-          "conditions": [
-            {
-              "id": "c1",
-              "leftValue": "={{ $json.missingSheets.length }}",
-              "rightValue": 0,
-              "operator": {
-                "type": "number",
-                "operation": "gt"
-              }
-            }
-          ],
-          "combinator": "and"
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "source_registry",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
         },
         "options": {}
       },
-      "id": "if-missing",
-      "name": "Any Missing?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [960, 0]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}:batchUpdate",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleApi",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ requests: $json.addRequests }) }}",
-        "options": {}
-      },
-      "id": "http-add-sheets",
-      "name": "Create Missing Tabs",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1200, -120],
+      "id": "append-sources",
+      "name": "Append source_registry seeds",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1920,
+        120
+      ],
       "credentials": {
         "googleApi": {
           "id": "VjDfIwHmyAdswLjT",
@@ -123,56 +250,196 @@
     },
     {
       "parameters": {
-        "jsCode": "// Build PUT value operations for all tabs: headers + seeds\nconst cfg = $('Plan Sheets').first().json;\nconst ops = [];\nfor (const [tab, cols] of Object.entries(cfg.headers)) {\n  ops.push({ tab, range: `${tab}!A1`, values: [cols] });\n  const seed = cfg.seeds[tab];\n  if (seed && seed.length) {\n    ops.push({ tab, range: `${tab}!A2`, values: seed });\n  }\n}\nreturn ops.map(o => ({ json: { spreadsheetId: cfg.spreadsheetId, ...o } }));"
+        "jsCode": "const rows = [\n  { fallback_id:'fb_001', category:'evergreen',  title:'Come capire se una news AI conta davvero per un business', angle:'Framework valutativo per filtrare segnale vs rumore',        target:'sme|entrepreneur', priority:'high',   enabled:'true' },\n  { fallback_id:'fb_002', category:'evergreen',  title:'3 segnali per distinguere hype da impatto reale',           angle:'Checklist anti-hype per decisori',                             target:'entrepreneur|solo_pro', priority:'high',   enabled:'true' },\n  { fallback_id:'fb_003', category:'practical',  title:'Dove l\\u2019AI sta gi\\u00e0 facendo risparmiare tempo alle PMI',       angle:'Casi operativi concreti',                                      target:'sme',             priority:'high',   enabled:'true' },\n  { fallback_id:'fb_004', category:'practical',  title:'Cosa guardare davvero quando esce un nuovo tool AI',        angle:'Criteri di valutazione veloci',                                target:'solo_pro|sme',    priority:'medium', enabled:'true' },\n  { fallback_id:'fb_005', category:'practical',  title:'Gli errori pi\\u00f9 comuni quando si prova a usare l\\u2019AI in azienda', angle:'Anti-pattern da evitare',                                      target:'sme|entrepreneur',priority:'high',   enabled:'true' },\n  { fallback_id:'fb_006', category:'trend',      title:'Perch\\u00e9 molte novit\\u00e0 AI non cambiano nulla nel lavoro quotidiano', angle:'Punto di vista critico ma costruttivo',                         target:'entrepreneur|solo_pro',priority:'medium',enabled:'true' },\n  { fallback_id:'fb_007', category:'practical',  title:'Come trasformare una novit\\u00e0 AI in vantaggio operativo concreto',  angle:'Metodo step-by-step',                                          target:'sme|solo_pro',    priority:'high',   enabled:'true' }\n];\nreturn rows.map(r => ({ json: r }));"
       },
-      "id": "build-ops",
-      "name": "Build Value Ops",
+      "id": "seed-fb",
+      "name": "Seed fallback_library items",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1440, 0]
+      "position": [
+        1680,
+        -120
+      ]
     },
     {
       "parameters": {
-        "method": "PUT",
-        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.range) }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleApi",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "valueInputOption", "value": "USER_ENTERED" }
-          ]
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
         },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ range: $json.range, majorDimension: 'ROWS', values: $json.values }) }}",
+        "sheetName": {
+          "__rl": true,
+          "value": "fallback_library",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
         "options": {}
       },
-      "id": "http-put-values",
-      "name": "Write Headers / Seeds",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1680, 0],
+      "id": "append-fb",
+      "name": "Append fallback_library seeds",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1920,
+        -120
+      ],
       "credentials": {
         "googleApi": {
           "id": "VjDfIwHmyAdswLjT",
           "name": "Google Sheets account"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status: 'ok', message: 'Setup completed.' } }];"
+      },
+      "id": "done",
+      "name": "Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        0
+      ]
     }
   ],
   "connections": {
-    "Webhook Trigger": { "main": [[{ "node": "Config", "type": "main", "index": 0 }]] },
-    "Config": { "main": [[{ "node": "Get Spreadsheet", "type": "main", "index": 0 }]] },
-    "Get Spreadsheet": { "main": [[{ "node": "Plan Sheets", "type": "main", "index": 0 }]] },
-    "Plan Sheets": { "main": [[{ "node": "Any Missing?", "type": "main", "index": 0 }]] },
-    "Any Missing?": {
+    "Webhook Trigger": {
       "main": [
-        [{ "node": "Create Missing Tabs", "type": "main", "index": 0 }],
-        [{ "node": "Build Value Ops", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Create source_registry",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Create Missing Tabs": { "main": [[{ "node": "Build Value Ops", "type": "main", "index": 0 }]] },
-    "Build Value Ops": { "main": [[{ "node": "Write Headers / Seeds", "type": "main", "index": 0 }]] }
+    "Create source_registry": {
+      "main": [
+        [
+          {
+            "node": "Create fallback_library",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create fallback_library": {
+      "main": [
+        [
+          {
+            "node": "Create run_logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create run_logs": {
+      "main": [
+        [
+          {
+            "node": "Create ranked_items_history",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create ranked_items_history": {
+      "main": [
+        [
+          {
+            "node": "Create content_history",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create content_history": {
+      "main": [
+        [
+          {
+            "node": "Create publication_feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create publication_feedback": {
+      "main": [
+        [
+          {
+            "node": "Seed source_registry items",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Seed fallback_library items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seed source_registry items": {
+      "main": [
+        [
+          {
+            "node": "Append source_registry seeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seed fallback_library items": {
+      "main": [
+        [
+          {
+            "node": "Append fallback_library seeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append source_registry seeds": {
+      "main": [
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append fallback_library seeds": {
+      "main": [
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   }
 }

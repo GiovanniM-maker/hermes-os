@@ -9,10 +9,7 @@
       "parameters": {
         "rule": {
           "interval": [
-            {
-              "field": "cronExpression",
-              "expression": "0 0 8 * * 1-5"
-            }
+            { "field": "cronExpression", "expression": "0 0 8 * * 1-5" }
           ]
         }
       },
@@ -26,14 +23,14 @@
       "parameters": {
         "assignments": {
           "assignments": [
-            { "id": "c1", "name": "spreadsheetId",     "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk", "type": "string" },
-            { "id": "c2", "name": "modelMain",         "value": "anthropic/claude-sonnet-4.5",                  "type": "string" },
-            { "id": "c3", "name": "modelQC",           "value": "openai/gpt-4o-mini",                           "type": "string" },
-            { "id": "c4", "name": "candidateMin",      "value": "7",                                             "type": "number" },
-            { "id": "c5", "name": "publishableMin",    "value": "8",                                             "type": "number" },
-            { "id": "c6", "name": "confidenceMin",     "value": "0.75",                                          "type": "number" },
-            { "id": "c7", "name": "contentFactoryId",  "value": "PLACEHOLDER_WF2_ID",                            "type": "string" },
-            { "id": "c8", "name": "deliveryWorkflowId","value": "PLACEHOLDER_WF3_ID",                            "type": "string" }
+            { "id": "c1", "name": "spreadsheetId",      "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk", "type": "string" },
+            { "id": "c2", "name": "modelMain",          "value": "anthropic/claude-sonnet-4.5", "type": "string" },
+            { "id": "c3", "name": "modelQC",            "value": "openai/gpt-4o-mini",          "type": "string" },
+            { "id": "c4", "name": "candidateMin",       "value": "7",                            "type": "number" },
+            { "id": "c5", "name": "publishableMin",     "value": "8",                            "type": "number" },
+            { "id": "c6", "name": "confidenceMin",      "value": "0.75",                         "type": "number" },
+            { "id": "c7", "name": "contentFactoryId",   "value": "PLACEHOLDER_WF2_ID",           "type": "string" },
+            { "id": "c8", "name": "deliveryWorkflowId", "value": "PLACEHOLDER_WF3_ID",           "type": "string" }
           ]
         },
         "options": {}
@@ -46,7 +43,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Init run context\nconst now = new Date();\nconst run_id = `run_${now.toISOString().slice(0,10)}_${now.getTime()}`;\nconst started_at = now.toISOString();\n\n// Time window: previous calendar day in Europe/Rome (with a safety margin back to 36h)\nconst msInDay = 24*3600*1000;\nconst toMs = now.getTime();\nconst fromMs = toMs - 36*3600*1000;\nreturn [{ json: {\n  run_id,\n  started_at,\n  window_from: new Date(fromMs).toISOString(),\n  window_to: new Date(toMs).toISOString(),\n  spreadsheetId: $('Config').first().json.spreadsheetId\n}}];"
+        "jsCode": "const now = new Date();\nconst run_id = `run_${now.toISOString().slice(0,10)}_${now.getTime()}`;\nconst started_at = now.toISOString();\nconst fromMs = now.getTime() - 36*3600*1000;\nreturn [{ json: { run_id, started_at, window_from: new Date(fromMs).toISOString(), window_to: now.toISOString() } }];"
       },
       "id": "init",
       "name": "Init Run",
@@ -56,30 +53,36 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/source_registry!A:I",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleApi",
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "source_registry",
+          "mode": "name"
+        },
         "options": {}
       },
-      "id": "get-sources",
+      "id": "read-sources",
       "name": "Read source_registry",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
       "position": [720, 0],
       "credentials": {
-        "googleApi": {
-          "id": "VjDfIwHmyAdswLjT",
-          "name": "Google Sheets account"
-        }
+        "googleApi": { "id": "VjDfIwHmyAdswLjT", "name": "Google Sheets account" }
       }
     },
     {
       "parameters": {
-        "jsCode": "// Parse rows into structured source objects, keep enabled only.\nconst values = ($json.values || []);\nif (!values.length) return [];\nconst [headers, ...rows] = values;\nconst idx = Object.fromEntries(headers.map((h,i)=>[h,i]));\nconst sources = rows.map(r => ({\n  source_id: r[idx.source_id]||'',\n  name: r[idx.name]||'',\n  url: r[idx.url]||'',\n  type: (r[idx.type]||'').toLowerCase(),\n  tier: r[idx.tier]||'tier2',\n  enabled: String(r[idx.enabled]||'').toLowerCase() === 'true',\n  topic_scope: r[idx.topic_scope]||'',\n  trust_score: parseFloat(r[idx.trust_score]||'0.5'),\n  notes: r[idx.notes]||''\n})).filter(s => s.enabled && s.url);\nreturn sources.map(s => ({ json: { ...s } }));"
+        "jsCode": "// Filter enabled sources; coerce numeric trust_score.\nconst items = $input.all().map(i => i.json).filter(r => String(r.enabled||'').toLowerCase() === 'true' && r.url);\nreturn items.map(s => ({ json: {\n  source_id: s.source_id || '',\n  name: s.name || '',\n  url: s.url,\n  type: String(s.type||'rss').toLowerCase(),\n  tier: s.tier || 'tier2',\n  topic_scope: s.topic_scope || '',\n  trust_score: typeof s.trust_score === 'number' ? s.trust_score : parseFloat(s.trust_score || '0.5'),\n  notes: s.notes || ''\n}}));"
       },
       "id": "parse-sources",
-      "name": "Parse Sources",
+      "name": "Filter Enabled Sources",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [960, 0]
@@ -92,12 +95,7 @@
               "conditions": {
                 "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
                 "conditions": [
-                  {
-                    "id": "r1",
-                    "leftValue": "={{ $json.type }}",
-                    "rightValue": "rss",
-                    "operator": { "type": "string", "operation": "equals" }
-                  }
+                  { "id": "r1", "leftValue": "={{ $json.type }}", "rightValue": "rss", "operator": { "type": "string", "operation": "equals" } }
                 ],
                 "combinator": "and"
               },
@@ -107,12 +105,7 @@
               "conditions": {
                 "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
                 "conditions": [
-                  {
-                    "id": "r2",
-                    "leftValue": "={{ $json.type }}",
-                    "rightValue": "html",
-                    "operator": { "type": "string", "operation": "equals" }
-                  }
+                  { "id": "r2", "leftValue": "={{ $json.type }}", "rightValue": "html", "operator": { "type": "string", "operation": "equals" } }
                 ],
                 "combinator": "and"
               },
@@ -162,7 +155,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Normalize RSS items into unified shape\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  // The source info must be re-looked-up; n8n's 'pairedItem' tracks it, but to be safe:\n  // The RSS node returns items each with own fields; source is the upstream triggering item.\n  // We use $('Parse Sources') pairing indirectly — since RSS node explodes per item, we lose direct source context.\n  // Workaround: read from runtime via node linkage is fragile. Instead: we preserve source via fetch-time injection below in helper nodes.\n  const r = it.json;\n  out.push({\n    title: r.title || '',\n    url: r.link || r.url || '',\n    summary: r.contentSnippet || r.content || r.description || '',\n    content_text: r.content || '',\n    published_at: r.isoDate || r.pubDate || r.published || null,\n    raw_type: 'rss'\n  });\n}\nreturn out.map(o => ({ json: o }));"
+        "jsCode": "// Normalize RSS items into unified shape.\nconst out = [];\nfor (const it of $input.all()) {\n  const r = it.json;\n  out.push({\n    title: r.title || '',\n    url: r.link || r.url || '',\n    summary: r.contentSnippet || r.content || r.description || '',\n    content_text: r.content || '',\n    published_at: r.isoDate || r.pubDate || r.published || null,\n    raw_type: 'rss'\n  });\n}\nreturn out.map(o => ({ json: o }));"
       },
       "id": "normalize-rss",
       "name": "Normalize RSS",
@@ -172,7 +165,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Very light HTML normalization: extract <a href> + inner text blocks that look like article titles.\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const body = String(it.json.data || it.json.body || it.json.response || it.json || '');\n  // naive anchor extraction\n  const anchorRe = /<a[^>]+href=\"([^\"]+)\"[^>]*>([\\s\\S]*?)<\\/a>/gi;\n  let m, count=0;\n  while ((m = anchorRe.exec(body)) !== null && count < 40) {\n    const href = m[1];\n    const text = m[2].replace(/<[^>]+>/g,'').replace(/\\s+/g,' ').trim();\n    if (text && text.length > 20 && text.length < 220 && /^https?:\\/\\//.test(href)) {\n      out.push({\n        title: text,\n        url: href,\n        summary: '',\n        content_text: '',\n        published_at: null,\n        raw_type: 'html'\n      });\n      count++;\n    }\n  }\n}\nreturn out.map(o => ({ json: o }));"
+        "jsCode": "// Light HTML anchor extraction.\nconst out = [];\nfor (const it of $input.all()) {\n  const body = String(it.json.data || it.json.body || it.json.response || it.json || '');\n  const anchorRe = /<a[^>]+href=\"([^\"]+)\"[^>]*>([\\s\\S]*?)<\\/a>/gi;\n  let m, count=0;\n  while ((m = anchorRe.exec(body)) !== null && count < 40) {\n    const href = m[1];\n    const text = m[2].replace(/<[^>]+>/g,'').replace(/\\s+/g,' ').trim();\n    if (text && text.length > 20 && text.length < 220 && /^https?:\\/\\//.test(href)) {\n      out.push({ title: text, url: href, summary: '', content_text: '', published_at: null, raw_type: 'html' });\n      count++;\n    }\n  }\n}\nreturn out.map(o => ({ json: o }));"
       },
       "id": "normalize-html",
       "name": "Normalize HTML",
@@ -194,7 +187,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Aggregate, canonicalize, dedupe, date-filter\nconst run = $('Init Run').first().json;\nconst windowFrom = new Date(run.window_from).getTime();\nconst windowTo = new Date(run.window_to).getTime();\n\nfunction canonical(url){\n  if (!url) return '';\n  try {\n    const u = new URL(url);\n    u.hash='';\n    const drop = new Set(['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid','ref','ref_src']);\n    const params=[...u.searchParams.entries()].filter(([k])=>!drop.has(k.toLowerCase()));\n    u.search = new URLSearchParams(params).toString();\n    return u.toString().replace(/\\/$/, '').toLowerCase();\n  } catch(e){ return String(url).toLowerCase(); }\n}\nfunction normTitle(t){ return String(t||'').toLowerCase().replace(/[^a-z0-9 ]+/g,' ').replace(/\\s+/g,' ').trim(); }\n\nconst raw = $input.all().map(i => i.json).filter(x => x && (x.title || x.url));\nconst dedupMap = new Map();\nlet rawCount=0, dateKept=0;\nfor (const r of raw) {\n  rawCount++;\n  const pubMs = r.published_at ? new Date(r.published_at).getTime() : null;\n  const inWindow = pubMs == null ? true : (pubMs >= windowFrom && pubMs <= windowTo);\n  if (!inWindow) continue;\n  dateKept++;\n  const cu = canonical(r.url);\n  const nt = normTitle(r.title);\n  const key = cu || `t:${nt}`;\n  const prev = dedupMap.get(key);\n  if (!prev) { dedupMap.set(key, r); continue; }\n  // Prefer official (tier1) / higher trust — but we lost source here. Keep earliest published or the one with a summary.\n  if ((r.summary||'').length > (prev.summary||'').length) dedupMap.set(key, r);\n}\nconst deduped = Array.from(dedupMap.values()).map((r, i) => ({\n  item_id: `i_${run.run_id}_${i}`,\n  title: r.title || '',\n  url: r.url || '',\n  canonical_url: canonical(r.url),\n  source_name: r.source_name || '',\n  source_tier: r.source_tier || '',\n  published_at: r.published_at || null,\n  summary: r.summary || '',\n  content_text: (r.content_text||'').slice(0, 1800),\n  raw_type: r.raw_type || '',\n  primary_topic: ''\n}));\n\nreturn [{ json: {\n  run_id: run.run_id,\n  started_at: run.started_at,\n  window_from: run.window_from,\n  window_to: run.window_to,\n  raw_items_count: rawCount,\n  dated_kept: dateKept,\n  deduped_count: deduped.length,\n  items: deduped\n}}];"
+        "jsCode": "// Dedupe + window filter.\nconst run = $('Init Run').first().json;\nconst windowFrom = new Date(run.window_from).getTime();\nconst windowTo = new Date(run.window_to).getTime();\nfunction canonical(url){ if(!url) return ''; try { const u=new URL(url); u.hash=''; const drop=new Set(['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid','ref','ref_src']); const p=[...u.searchParams.entries()].filter(([k])=>!drop.has(k.toLowerCase())); u.search=new URLSearchParams(p).toString(); return u.toString().replace(/\\/$/,'').toLowerCase(); } catch(e){ return String(url).toLowerCase(); } }\nfunction normTitle(t){ return String(t||'').toLowerCase().replace(/[^a-z0-9 ]+/g,' ').replace(/\\s+/g,' ').trim(); }\nconst raw = $input.all().map(i=>i.json).filter(x=>x && (x.title||x.url));\nconst map = new Map();\nlet rawCount=0, dateKept=0;\nfor (const r of raw){\n  rawCount++;\n  const ms = r.published_at ? new Date(r.published_at).getTime() : null;\n  const inWin = ms==null ? true : (ms>=windowFrom && ms<=windowTo);\n  if(!inWin) continue;\n  dateKept++;\n  const cu = canonical(r.url);\n  const nt = normTitle(r.title);\n  const key = cu || `t:${nt}`;\n  const prev = map.get(key);\n  if(!prev){ map.set(key,r); continue; }\n  if((r.summary||'').length > (prev.summary||'').length) map.set(key,r);\n}\nconst deduped = Array.from(map.values()).map((r,i)=>({\n  item_id:`i_${run.run_id}_${i}`, title:r.title||'', url:r.url||'', canonical_url:canonical(r.url),\n  source_name:r.source_name||'', source_tier:r.source_tier||'',\n  published_at:r.published_at||null, summary:r.summary||'', content_text:(r.content_text||'').slice(0,1800),\n  raw_type:r.raw_type||'', primary_topic:''\n}));\nreturn [{ json: { run_id:run.run_id, started_at:run.started_at, window_from:run.window_from, window_to:run.window_to, raw_items_count:rawCount, dated_kept:dateKept, deduped_count:deduped.length, items:deduped }}];"
       },
       "id": "dedupe",
       "name": "Dedupe + Filter",
@@ -204,7 +197,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Build one LLM batch scoring request. Cap items to first 40 to control tokens.\nconst cfg = $('Config').first().json;\nconst data = $json;\nconst items = (data.items || []).slice(0, 40);\n\nif (!items.length) {\n  return [{ json: { ...data, skip_llm: true, scored_items: [] } }];\n}\n\nconst system = `Sei un analista senior di AI/business. Valuti news AI per un pubblico italiano di imprenditori, PMI e liberi professionisti. Output: SOLO JSON valido.`;\n\nconst criteria = `Priorità: 1) impatto su mercato 2) impatto su business 3) shareability 4) rilevanza Italia 5) interesse nicchia 6) autorità fonte 7) novità. Penalizza: minor updates, contenuti troppo tecnici per sviluppatori, bassa rilevanza business, hype vuoto.`;\n\nconst userPayload = {\n  task: 'score_items',\n  criteria,\n  required_output_schema: {\n    scores: [{\n      item_id: 'string',\n      candidate_score: 'number 0-10',\n      publishable_score: 'number 0-10',\n      confidence: 'number 0-1',\n      primary_topic: 'string',\n      rationale: 'string (1 frase)'\n    }]\n  },\n  items: items.map(it => ({\n    item_id: it.item_id,\n    title: it.title,\n    url: it.url,\n    source_name: it.source_name,\n    source_tier: it.source_tier,\n    published_at: it.published_at,\n    summary: (it.summary||'').slice(0,600)\n  }))\n};\n\nconst body = {\n  model: cfg.modelMain,\n  temperature: 0.1,\n  max_tokens: 3000,\n  response_format: { type: 'json_object' },\n  messages: [\n    { role: 'system', content: system },\n    { role: 'user', content: JSON.stringify(userPayload) }\n  ]\n};\n\nreturn [{ json: { ...data, openrouter_body: body, items_for_scoring: items } }];"
+        "jsCode": "// Build single batched OpenRouter scoring request (cap 40 items).\nconst cfg = $('Config').first().json;\nconst data = $json;\nconst items = (data.items || []).slice(0, 40);\nif (!items.length) return [{ json: { ...data, skip_llm: true, scored_items: [] } }];\nconst system = `Sei un analista senior di AI/business. Valuti news AI per un pubblico italiano di imprenditori, PMI e liberi professionisti. Output: SOLO JSON valido.`;\nconst criteria = `Priorit\\u00e0: 1) impatto su mercato 2) impatto su business 3) shareability 4) rilevanza Italia 5) interesse nicchia 6) autorit\\u00e0 fonte 7) novit\\u00e0. Penalizza: minor updates, contenuti troppo tecnici per sviluppatori, bassa rilevanza business, hype vuoto.`;\nconst userPayload = {\n  task:'score_items', criteria,\n  required_output_schema:{ scores:[{ item_id:'string', candidate_score:'0-10', publishable_score:'0-10', confidence:'0-1', primary_topic:'string', rationale:'1 frase' }]},\n  items: items.map(it=>({ item_id:it.item_id, title:it.title, url:it.url, source_name:it.source_name, source_tier:it.source_tier, published_at:it.published_at, summary:(it.summary||'').slice(0,600) }))\n};\nconst body = { model: cfg.modelMain, temperature:0.1, max_tokens:3000, response_format:{type:'json_object'}, messages:[{role:'system',content:system},{role:'user',content:JSON.stringify(userPayload)}] };\nreturn [{ json: { ...data, openrouter_body: body } }];"
       },
       "id": "build-score",
       "name": "Build Scoring Prompt",
@@ -239,10 +232,7 @@
       "typeVersion": 4.2,
       "position": [2640, 0],
       "credentials": {
-        "openRouterApi": {
-          "id": "mpMk74pCZg2Efk6i",
-          "name": "OpenRouter account"
-        }
+        "openRouterApi": { "id": "mpMk74pCZg2Efk6i", "name": "OpenRouter account" }
       },
       "retryOnFail": true,
       "maxTries": 2,
@@ -250,7 +240,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse scores and merge with items, decide run mode, shortlist, and fetch fallback library if needed.\nconst cfg = $('Config').first().json;\nconst dataNode = $('Dedupe + Filter').first().json;\nconst items = dataNode.items || [];\n\nfunction safeParse(s){ try { return JSON.parse(s); } catch(e){ return null; } }\nlet parsed = null;\nconst resp = $json;\nconst choices = resp.choices || (resp.body && resp.body.choices);\nif (choices && choices[0]) parsed = safeParse(choices[0].message?.content);\nconst scoresById = {};\nif (parsed && Array.isArray(parsed.scores)) {\n  for (const s of parsed.scores) scoresById[s.item_id] = s;\n}\n\nconst enriched = items.map(it => {\n  const s = scoresById[it.item_id] || {};\n  return {\n    ...it,\n    candidate_score: typeof s.candidate_score==='number' ? s.candidate_score : 0,\n    publishable_score: typeof s.publishable_score==='number' ? s.publishable_score : 0,\n    confidence: typeof s.confidence==='number' ? s.confidence : 0,\n    primary_topic: s.primary_topic || '',\n    rationale: s.rationale || ''\n  };\n});\n\n// Apply thresholds\nconst candMin = Number(cfg.candidateMin)||7;\nconst pubMin  = Number(cfg.publishableMin)||8;\nconst confMin = Number(cfg.confidenceMin)||0.75;\n\nconst publishable = enriched\n  .filter(x => x.candidate_score >= candMin && x.publishable_score >= pubMin && x.confidence >= confMin)\n  .sort((a,b) => (b.publishable_score - a.publishable_score) || (b.confidence - a.confidence));\n\nconst candidates = enriched\n  .filter(x => x.candidate_score >= candMin && !publishable.includes(x))\n  .sort((a,b) => b.candidate_score - a.candidate_score);\n\n// Mode selection\nlet mode;\nif (!enriched.length) mode = 'HARD_STOP';\nelse if (publishable.length >= 3) mode = 'FULL_NEWS';\nelse if (publishable.length >= 1) mode = 'HYBRID';\nelse if (candidates.length >= 2) mode = 'MONITOR_ONLY';\nelse mode = 'FALLBACK';\n\nconst selected = publishable.slice(0,3);\nconst backup = candidates.slice(0,2);\n\n// Shortlist for digest\nconst shortlist = [...selected, ...candidates.slice(0, Math.max(0, 5-selected.length))]\n  .slice(0,5)\n  .map(x => ({ title: x.title, reason: x.rationale || `score ${x.publishable_score}` }));\n\nreturn [{ json: {\n  run_id: dataNode.run_id,\n  started_at: dataNode.started_at,\n  mode,\n  enriched,\n  selected_items: selected,\n  backup_items: backup,\n  shortlist,\n  meta: {\n    sources_total: (enriched.length>0 ? 'see-logs' : 0),\n    sources_failed: 0,\n    raw_items_count: dataNode.raw_items_count,\n    deduped_count: dataNode.deduped_count,\n    selected_count: selected.length\n  }\n}}];"
+        "jsCode": "// Parse scores, apply thresholds, select mode.\nconst cfg = $('Config').first().json;\nconst dataNode = $('Dedupe + Filter').first().json;\nconst items = dataNode.items || [];\nfunction parse(s){ try{return JSON.parse(s);}catch(e){return null;} }\nlet parsed = null;\nconst resp = $json;\nconst choices = resp.choices || (resp.body && resp.body.choices);\nif (choices && choices[0]) parsed = parse(choices[0].message?.content);\nconst scoresById = {};\nif (parsed && Array.isArray(parsed.scores)) { for (const s of parsed.scores) scoresById[s.item_id]=s; }\nconst enriched = items.map(it=>{\n  const s = scoresById[it.item_id] || {};\n  return { ...it,\n    candidate_score: typeof s.candidate_score==='number'?s.candidate_score:0,\n    publishable_score: typeof s.publishable_score==='number'?s.publishable_score:0,\n    confidence: typeof s.confidence==='number'?s.confidence:0,\n    primary_topic: s.primary_topic||'',\n    rationale: s.rationale||''\n  };\n});\nconst candMin = Number(cfg.candidateMin)||7;\nconst pubMin  = Number(cfg.publishableMin)||8;\nconst confMin = Number(cfg.confidenceMin)||0.75;\nconst publishable = enriched.filter(x=>x.candidate_score>=candMin && x.publishable_score>=pubMin && x.confidence>=confMin).sort((a,b)=>(b.publishable_score-a.publishable_score)||(b.confidence-a.confidence));\nconst candidates  = enriched.filter(x=>x.candidate_score>=candMin && !publishable.includes(x)).sort((a,b)=>b.candidate_score-a.candidate_score);\nlet mode;\nif (!enriched.length) mode='HARD_STOP';\nelse if (publishable.length>=3) mode='FULL_NEWS';\nelse if (publishable.length>=1) mode='HYBRID';\nelse if (candidates.length>=2) mode='MONITOR_ONLY';\nelse mode='FALLBACK';\nconst selected = publishable.slice(0,3);\nconst backup = candidates.slice(0,2);\nconst shortlist = [...selected, ...candidates.slice(0, Math.max(0,5-selected.length))].slice(0,5).map(x=>({ title:x.title, reason:x.rationale || `score ${x.publishable_score}` }));\nreturn [{ json: {\n  run_id: dataNode.run_id, started_at: dataNode.started_at, mode, enriched,\n  selected_items: selected, backup_items: backup, shortlist,\n  meta: { sources_total:0, sources_failed:0, raw_items_count:dataNode.raw_items_count, deduped_count:dataNode.deduped_count, selected_count:selected.length }\n}}];"
       },
       "id": "parse-scores",
       "name": "Parse Scores + Select Mode",
@@ -260,27 +250,34 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $('Config').first().json.spreadsheetId }}/values/fallback_library!A:G",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleApi",
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "fallback_library",
+          "mode": "name"
+        },
         "options": {}
       },
-      "id": "get-fallback",
+      "id": "read-fallback",
       "name": "Read fallback_library",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
       "position": [3120, 0],
       "credentials": {
-        "googleApi": {
-          "id": "VjDfIwHmyAdswLjT",
-          "name": "Google Sheets account"
-        }
-      }
+        "googleApi": { "id": "VjDfIwHmyAdswLjT", "name": "Google Sheets account" }
+      },
+      "alwaysOutputData": true
     },
     {
       "parameters": {
-        "jsCode": "// Attach fallback items when needed. Keep everything in one envelope for WF2 and WF3.\nconst intel = $('Parse Scores + Select Mode').first().json;\nconst fb = $json;\nconst fbRows = fb.values || [];\nlet fallbacks = [];\nif (fbRows.length > 1) {\n  const [h, ...rows] = fbRows;\n  const idx = Object.fromEntries(h.map((k,i)=>[k,i]));\n  fallbacks = rows.map(r => ({\n    fallback_id: r[idx.fallback_id]||'',\n    category: r[idx.category]||'',\n    title: r[idx.title]||'',\n    angle: r[idx.angle]||'',\n    target: r[idx.target]||'',\n    priority: r[idx.priority]||'medium',\n    enabled: String(r[idx.enabled]||'').toLowerCase()==='true'\n  })).filter(x => x.enabled);\n  // Priority ordering\n  const rank = { high: 0, medium: 1, low: 2 };\n  fallbacks.sort((a,b) => (rank[a.priority]??1) - (rank[b.priority]??1));\n}\n\nconst envelope = {\n  run_id: intel.run_id,\n  started_at: intel.started_at,\n  mode: intel.mode,\n  selected_items: intel.selected_items,\n  backup_items: intel.backup_items,\n  fallback_items: fallbacks.slice(0,3),\n  shortlist: intel.shortlist,\n  meta: intel.meta,\n  note: ''\n};\n\n// Build rows for ranked_items_history\nconst rows = (intel.enriched || []).map(x => [\n  intel.run_id,\n  x.item_id,\n  x.title,\n  x.url,\n  x.source_name || '',\n  x.published_at || '',\n  x.primary_topic || '',\n  x.candidate_score,\n  x.publishable_score,\n  x.confidence,\n  (intel.selected_items||[]).some(s => s.item_id === x.item_id) ? 'yes' : 'no',\n  x.rationale || ''\n]);\n\nreturn [{ json: {\n  spreadsheetId: $('Config').first().json.spreadsheetId,\n  range: 'ranked_items_history!A:L',\n  values: rows,\n  envelope\n}}];"
+        "jsCode": "// Combine intel scoring with fallback library. Emit two outputs:\n//   out[0] = single envelope item (for WF2 + WF3)\n//   out[1] = one item per enriched row (for Append ranked_items_history autoMap)\nconst intel = $('Parse Scores + Select Mode').first().json;\nconst fbItems = $input.all().map(i=>i.json).filter(r=> String(r.enabled||'').toLowerCase()==='true');\nconst rank = { high:0, medium:1, low:2 };\nfbItems.sort((a,b) => (rank[a.priority]??1) - (rank[b.priority]??1));\nconst envelope = {\n  run_id: intel.run_id,\n  started_at: intel.started_at,\n  mode: intel.mode,\n  selected_items: intel.selected_items,\n  backup_items: intel.backup_items,\n  fallback_items: fbItems.slice(0,3),\n  shortlist: intel.shortlist,\n  meta: intel.meta,\n  note: ''\n};\nconst selectedIds = new Set((intel.selected_items||[]).map(s=>s.item_id));\nconst rows = (intel.enriched||[]).map(x => ({\n  run_id: intel.run_id,\n  item_id: x.item_id,\n  title: x.title,\n  url: x.url,\n  source_name: x.source_name || '',\n  published_at: x.published_at || '',\n  primary_topic: x.primary_topic || '',\n  candidate_score: x.candidate_score,\n  publishable_score: x.publishable_score,\n  confidence: x.confidence,\n  selected_yes_no: selectedIds.has(x.item_id) ? 'yes' : 'no',\n  selection_reason: x.rationale || ''\n}));\nreturn [[{ json: envelope }], rows.map(r => ({ json: r }))];"
       },
       "id": "build-envelope",
       "name": "Build Envelope",
@@ -290,54 +287,35 @@
     },
     {
       "parameters": {
-        "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
-          "conditions": [
-            {
-              "id": "h1",
-              "leftValue": "={{ $json.values.length }}",
-              "rightValue": 0,
-              "operator": { "type": "number", "operation": "gt" }
-            }
-          ],
-          "combinator": "and"
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
         },
-        "options": {}
-      },
-      "id": "if-has-rows",
-      "name": "Any Ranked Rows?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [3600, 0]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.range) }}:append",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleApi",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "valueInputOption", "value": "USER_ENTERED" },
-            { "name": "insertDataOption", "value": "INSERT_ROWS" }
-          ]
+        "sheetName": {
+          "__rl": true,
+          "value": "ranked_items_history",
+          "mode": "name"
         },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ range: $json.range, majorDimension: 'ROWS', values: $json.values }) }}",
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
         "options": {}
       },
       "id": "append-ranked",
       "name": "Append ranked_items_history",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [3840, -120],
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [3600, 120],
       "credentials": {
-        "googleApi": {
-          "id": "VjDfIwHmyAdswLjT",
-          "name": "Google Sheets account"
-        }
+        "googleApi": { "id": "VjDfIwHmyAdswLjT", "name": "Google Sheets account" }
       },
       "onError": "continueRegularOutput"
     },
@@ -348,14 +326,14 @@
         "workflowInputs": {
           "mappingMode": "defineBelow",
           "value": {
-            "run_id": "={{ $('Build Envelope').first().json.envelope.run_id }}",
-            "mode": "={{ $('Build Envelope').first().json.envelope.mode }}",
-            "started_at": "={{ $('Build Envelope').first().json.envelope.started_at }}",
-            "selected_items": "={{ $('Build Envelope').first().json.envelope.selected_items }}",
-            "backup_items": "={{ $('Build Envelope').first().json.envelope.backup_items }}",
-            "fallback_items": "={{ $('Build Envelope').first().json.envelope.fallback_items }}",
-            "shortlist": "={{ $('Build Envelope').first().json.envelope.shortlist }}",
-            "meta": "={{ $('Build Envelope').first().json.envelope.meta }}"
+            "run_id": "={{ $json.run_id }}",
+            "mode": "={{ $json.mode }}",
+            "started_at": "={{ $json.started_at }}",
+            "selected_items": "={{ $json.selected_items }}",
+            "backup_items": "={{ $json.backup_items }}",
+            "fallback_items": "={{ $json.fallback_items }}",
+            "shortlist": "={{ $json.shortlist }}",
+            "meta": "={{ $json.meta }}"
           }
         },
         "options": {}
@@ -364,7 +342,7 @@
       "name": "Call Content Factory",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
-      "position": [4080, 0]
+      "position": [3600, -120]
     },
     {
       "parameters": {
@@ -373,13 +351,13 @@
         "workflowInputs": {
           "mappingMode": "defineBelow",
           "value": {
-            "run_id": "={{ $('Build Envelope').first().json.envelope.run_id }}",
-            "mode": "={{ $('Build Envelope').first().json.envelope.mode }}",
-            "started_at": "={{ $('Build Envelope').first().json.envelope.started_at }}",
-            "shortlist": "={{ $('Build Envelope').first().json.envelope.shortlist }}",
+            "run_id": "={{ $json.run_id }}",
+            "mode": "={{ $json.mode }}",
+            "started_at": "={{ $json.started_at }}",
+            "shortlist": "={{ $json.shortlist }}",
             "content_packages": "={{ $json.packages || [] }}",
-            "meta": "={{ $('Build Envelope').first().json.envelope.meta }}",
-            "note": "={{ $('Build Envelope').first().json.envelope.note || '' }}"
+            "meta": "={{ $json.meta }}",
+            "note": "={{ $json.note || '' }}"
           }
         },
         "options": {}
@@ -388,15 +366,15 @@
       "name": "Call Delivery",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
-      "position": [4320, 0]
+      "position": [3840, -120]
     }
   ],
   "connections": {
     "Schedule M-F 08:00": { "main": [[{ "node": "Config", "type": "main", "index": 0 }]] },
     "Config": { "main": [[{ "node": "Init Run", "type": "main", "index": 0 }]] },
     "Init Run": { "main": [[{ "node": "Read source_registry", "type": "main", "index": 0 }]] },
-    "Read source_registry": { "main": [[{ "node": "Parse Sources", "type": "main", "index": 0 }]] },
-    "Parse Sources": { "main": [[{ "node": "Route by Type", "type": "main", "index": 0 }]] },
+    "Read source_registry": { "main": [[{ "node": "Filter Enabled Sources", "type": "main", "index": 0 }]] },
+    "Filter Enabled Sources": { "main": [[{ "node": "Route by Type", "type": "main", "index": 0 }]] },
     "Route by Type": {
       "main": [
         [{ "node": "RSS Feed Read", "type": "main", "index": 0 }],
@@ -413,14 +391,12 @@
     "OpenRouter Score": { "main": [[{ "node": "Parse Scores + Select Mode", "type": "main", "index": 0 }], [{ "node": "Parse Scores + Select Mode", "type": "main", "index": 0 }]] },
     "Parse Scores + Select Mode": { "main": [[{ "node": "Read fallback_library", "type": "main", "index": 0 }]] },
     "Read fallback_library": { "main": [[{ "node": "Build Envelope", "type": "main", "index": 0 }]] },
-    "Build Envelope": { "main": [[{ "node": "Any Ranked Rows?", "type": "main", "index": 0 }]] },
-    "Any Ranked Rows?": {
+    "Build Envelope": {
       "main": [
-        [{ "node": "Append ranked_items_history", "type": "main", "index": 0 }],
-        [{ "node": "Call Content Factory", "type": "main", "index": 0 }]
+        [{ "node": "Call Content Factory", "type": "main", "index": 0 }],
+        [{ "node": "Append ranked_items_history", "type": "main", "index": 0 }]
       ]
     },
-    "Append ranked_items_history": { "main": [[{ "node": "Call Content Factory", "type": "main", "index": 0 }]] },
     "Call Content Factory": { "main": [[{ "node": "Call Delivery", "type": "main", "index": 0 }]] }
   }
 }

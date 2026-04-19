@@ -101,7 +101,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Aggregate all packages (from the per-item fanout) into a single output\nconst pkgs = $input.all().map(i => i.json);\nconst first = pkgs[0] || {};\nconst run_id = first.run_id || $('Prepare Jobs').first().json.run_id;\nconst mode = first.mode || $('Prepare Jobs').first().json.mode;\nconst upstream = $('When Executed By Workflow').first().json || {};\n\n// Build sheet rows for content_history\nconst headers = ['content_id','run_id','item_id','mode','platform_pair','status','confidence_label','instagram_hook','instagram_script','instagram_caption','instagram_cta','linkedin_post','source_name','source_url','prompt_version'];\nconst rows = pkgs.map(p => [\n  p.content_id, p.run_id, p.item_id || '', p.mode, p.platform_pair, p.status, p.confidence_label,\n  (p.instagram||{}).hook || '', (p.instagram||{}).script || '', (p.instagram||{}).caption || '', (p.instagram||{}).cta || '',\n  (p.linkedin||{}).post || '', p.source_name || '', p.source_url || '', p.prompt_version || ''\n]);\n\nreturn [{\n  json: {\n    spreadsheetId: '1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk',\n    range: 'content_history!A:O',\n    values: rows,\n    packages: pkgs,\n    run_id,\n    mode,\n    shortlist: upstream.shortlist || [],\n    meta: upstream.meta || {},\n    note: upstream.note || '',\n    started_at: upstream.started_at || new Date().toISOString()\n  }\n}];"
+        "jsCode": "// Aggregate packages, split into TWO outputs:\n//   [0] envelope for downstream (packages + shortlist/meta)\n//   [1] one item per row for the content_history Append node (autoMap)\nconst pkgs = $input.all().map(i => i.json);\nconst first = pkgs[0] || {};\nconst run_id = first.run_id || $('Prepare Jobs').first().json.run_id;\nconst mode = first.mode || $('Prepare Jobs').first().json.mode;\nconst upstream = $('When Executed By Workflow').first().json || {};\n\nconst rows = pkgs.map(p => ({\n  content_id: p.content_id,\n  run_id: p.run_id,\n  item_id: p.item_id || '',\n  mode: p.mode,\n  platform_pair: p.platform_pair,\n  status: p.status,\n  confidence_label: p.confidence_label,\n  instagram_hook:    (p.instagram||{}).hook || '',\n  instagram_script:  (p.instagram||{}).script || '',\n  instagram_caption: (p.instagram||{}).caption || '',\n  instagram_cta:     (p.instagram||{}).cta || '',\n  linkedin_post:     (p.linkedin||{}).post || '',\n  source_name: p.source_name || '',\n  source_url: p.source_url || '',\n  prompt_version: p.prompt_version || ''\n}));\n\nconst envelope = {\n  packages: pkgs,\n  run_id,\n  mode,\n  shortlist: upstream.shortlist || [],\n  meta: upstream.meta || {},\n  note: upstream.note || '',\n  started_at: upstream.started_at || new Date().toISOString(),\n  rows_count: rows.length\n};\n\nreturn [[{ json: envelope }], rows.map(r => ({ json: r }))];"
       },
       "id": "aggregate",
       "name": "Aggregate Packages",
@@ -111,79 +111,47 @@
     },
     {
       "parameters": {
-        "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
-          "conditions": [
-            {
-              "id": "has-rows",
-              "leftValue": "={{ $json.values.length }}",
-              "rightValue": 0,
-              "operator": { "type": "number", "operation": "gt" }
-            }
-          ],
-          "combinator": "and"
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
         },
-        "options": {}
-      },
-      "id": "if-any",
-      "name": "Any Package?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [1680, 0]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.range) }}:append",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleApi",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "valueInputOption", "value": "USER_ENTERED" },
-            { "name": "insertDataOption", "value": "INSERT_ROWS" }
-          ]
+        "sheetName": {
+          "__rl": true,
+          "value": "content_history",
+          "mode": "name"
         },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ range: $json.range, majorDimension: 'ROWS', values: $json.values }) }}",
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
         "options": {}
       },
       "id": "append-history",
       "name": "Append content_history",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1920, -120],
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [1920, 120],
       "credentials": {
-        "googleApi": {
-          "id": "VjDfIwHmyAdswLjT",
-          "name": "Google Sheets account"
-        }
+        "googleApi": { "id": "VjDfIwHmyAdswLjT", "name": "Google Sheets account" }
       },
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "workflowId": "={{ $workflow.deliveryWorkflowId || 'PLACEHOLDER_WF3_ID' }}",
-        "mode": "each",
-        "options": {}
-      },
-      "id": "call-wf3",
-      "name": "Call Delivery Workflow",
-      "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 1.2,
-      "position": [2160, 0],
-      "disabled": true
-    },
-    {
-      "parameters": {
-        "jsCode": "// Passthrough to expose the final packages to whoever called this WF (WF1).\n// The caller can then trigger WF3 directly. Returns one item containing the full envelope.\nreturn [{ json: $json }];"
+        "jsCode": "// Passthrough — expose the final envelope (single item) to caller (WF1).\nreturn [{ json: $json }];"
       },
       "id": "return",
       "name": "Return Envelope",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2160, 120]
+      "position": [1920, -120]
     }
   ],
   "connections": {
@@ -193,13 +161,11 @@
     "Build Prompt": { "main": [[{ "node": "OpenRouter Generate", "type": "main", "index": 0 }]] },
     "OpenRouter Generate": { "main": [[{ "node": "Parse & Assemble", "type": "main", "index": 0 }], [{ "node": "Parse & Assemble", "type": "main", "index": 0 }]] },
     "Parse & Assemble": { "main": [[{ "node": "Aggregate Packages", "type": "main", "index": 0 }]] },
-    "Aggregate Packages": { "main": [[{ "node": "Any Package?", "type": "main", "index": 0 }]] },
-    "Any Package?": {
+    "Aggregate Packages": {
       "main": [
-        [{ "node": "Append content_history", "type": "main", "index": 0 }],
-        [{ "node": "Return Envelope", "type": "main", "index": 0 }]
+        [{ "node": "Return Envelope", "type": "main", "index": 0 }],
+        [{ "node": "Append content_history", "type": "main", "index": 0 }]
       ]
-    },
-    "Append content_history": { "main": [[{ "node": "Return Envelope", "type": "main", "index": 0 }]] }
+    }
   }
 }
