@@ -20,7 +20,7 @@
         "assignments": {
           "assignments": [
             { "id": "cfg1", "name": "spreadsheetId", "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk", "type": "string" },
-            { "id": "cfg2", "name": "telegramChatId", "value": "PLACEHOLDER_CHAT_ID", "type": "string" }
+            { "id": "cfg2", "name": "telegramChatId", "value": "5753011656", "type": "string" }
           ]
         },
         "options": {}
