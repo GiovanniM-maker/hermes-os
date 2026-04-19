@@ -1,0 +1,205 @@
+{
+  "name": "AI_Daily_Content_Factory",
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Rome"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "trg",
+      "name": "When Executed By Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "c1", "name": "spreadsheetId", "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk", "type": "string" },
+            { "id": "c2", "name": "modelMain",      "value": "anthropic/claude-sonnet-4.5", "type": "string" },
+            { "id": "c3", "name": "modelQC",        "value": "openai/gpt-4o-mini",          "type": "string" },
+            { "id": "c4", "name": "promptVersion",  "value": "v1",                          "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cfg",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare list of 'jobs' to process.\n// Each job = { kind: 'news'|'fallback', item: {...} }\nconst input = $input.first().json;\nconst mode = input.mode || 'FALLBACK';\nconst run_id = input.run_id || `run_${Date.now()}`;\nconst selected = Array.isArray(input.selected_items) ? input.selected_items : [];\nconst fallbacks = Array.isArray(input.fallback_items) ? input.fallback_items : [];\n\nif (mode === 'MONITOR_ONLY' || mode === 'HARD_STOP') {\n  // No content packages are produced for these modes — emit an empty job list\n  return [];\n}\n\nconst jobs = [];\nif (mode === 'FULL_NEWS') {\n  selected.slice(0,3).forEach(it => jobs.push({ kind:'news', item: it }));\n} else if (mode === 'HYBRID') {\n  selected.slice(0,3).forEach(it => jobs.push({ kind:'news', item: it }));\n  const need = 3 - jobs.length;\n  fallbacks.slice(0, need).forEach(it => jobs.push({ kind:'fallback', item: it }));\n} else if (mode === 'FALLBACK') {\n  fallbacks.slice(0,3).forEach(it => jobs.push({ kind:'fallback', item: it }));\n}\nreturn jobs.map((j, idx) => ({ json: { ...j, job_idx: idx, run_id, mode } }));"
+      },
+      "id": "prep",
+      "name": "Prepare Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the messages body for OpenRouter\nconst cfg = $('Config').first().json;\nconst job = $json;\nconst isFallback = job.kind === 'fallback';\nconst item = job.item || {};\n\nconst system = `Sei un editor esperto di AI e business. Scrivi in italiano, prima persona, tono semplice, moderno, moderatamente opinato, non hype, non corporate, non guru, non troppo tecnico. Target: imprenditori, PMI, liberi professionisti. Obiettivo: posizionamento + lead generation futura. Output: SOLO JSON valido, senza testo fuori dal JSON.`;\n\nconst schema = {\n  claim_sheet: {\n    what_happened: 'string',\n    who: 'string',\n    when: 'string',\n    why_it_matters: 'string',\n    business_implication: 'string',\n    italy_relevance: 'string',\n    what_we_cannot_claim: 'string',\n    source_type: 'official|trusted_media|monitored_account|leak|evergreen',\n    is_leak: 'boolean',\n    confidence_reason: 'string'\n  },\n  angle: {\n    entrepreneur_relevance: 'string',\n    sme_relevance: 'string',\n    solo_pro_relevance: 'string',\n    practical_takeaway: 'string',\n    anti_hype_framing: 'string'\n  },\n  instagram: {\n    hook: 'string (max 12 parole, forte)',\n    script: 'string (30-45s parlato, 80-130 parole, ritmo semplice, prima persona)',\n    caption: 'string (2-4 frasi)',\n    cta: 'string (1 frase, concreta)'\n  },\n  linkedin: {\n    post: 'string (classic post, 120-220 parole, clean)',\n    take_personal: 'string (1-2 frasi di opinione personale)'\n  },\n  qc: {\n    factual_safety_ok: 'boolean',\n    leak_labeling_ok: 'boolean',\n    audience_fit_ok: 'boolean',\n    simplicity_ok: 'boolean',\n    usefulness_ok: 'boolean',\n    non_hype_ok: 'boolean',\n    platform_fit_ok: 'boolean',\n    status: 'ready|review|raw|discarded',\n    confidence_label: 'high|medium|low'\n  },\n  meta: {\n    topic: 'string',\n    why_it_matters: 'string (1 frase sintetica)',\n    why_it_can_work: 'string (1 frase)',\n    recording_time_estimate: 'string (es: 30-40s)'\n  }\n};\n\nconst rulesLeak = `Se la fonte è un leak o un rumor non confermato, is_leak=true e ogni testo Instagram/LinkedIn DEVE etichettare esplicitamente (\"leak\", \"rumor non confermato\") e non presentare come fatto confermato. In caso di confidence basso o fatti non verificabili, status massimo = review (mai ready).`;\n\nlet userPayload;\nif (!isFallback) {\n  userPayload = {\n    mode: job.mode,\n    input_kind: 'news',\n    news_item: {\n      title: item.title,\n      url: item.url,\n      source_name: item.source_name,\n      source_tier: item.source_tier,\n      published_at: item.published_at,\n      summary: item.summary,\n      primary_topic: item.primary_topic,\n      notes: item.notes || null\n    },\n    schema,\n    rules_leak: rulesLeak,\n    required: 'Genera un pacchetto editoriale completo. Se non riesci a garantire utilità e veridicità, status=discarded.'\n  };\n} else {\n  userPayload = {\n    mode: job.mode,\n    input_kind: 'fallback',\n    fallback_topic: {\n      title: item.title || item.fallback_title,\n      category: item.category,\n      angle: item.angle,\n      target: item.target\n    },\n    schema,\n    rules_leak: rulesLeak,\n    required: 'Genera un pacchetto evergreen/trend/practical coerente col topic fallback. Nessuna claim di news fresca.'\n  };\n}\n\nconst body = {\n  model: cfg.modelMain,\n  temperature: 0.4,\n  max_tokens: 2200,\n  response_format: { type: 'json_object' },\n  messages: [\n    { role: 'system', content: system },\n    { role: 'user', content: JSON.stringify(userPayload) }\n  ]\n};\n\nreturn [{ json: { ...job, openrouter_body: body } }];"
+      },
+      "id": "build-prompt",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-Title", "value": "AI Daily Content Factory" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.openrouter_body) }}",
+        "options": {
+          "timeout": 120000,
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "id": "llm-call",
+      "name": "OpenRouter Generate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 0],
+      "credentials": {
+        "openRouterApi": {
+          "id": "mpMk74pCZg2Efk6i",
+          "name": "OpenRouter account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse LLM response, assemble final content package\nfunction safeParse(s){ try { return JSON.parse(s); } catch(e){ return null; } }\n\nconst inp = $json;\nconst run_id = $('Prepare Jobs').first().json.run_id || inp.run_id || 'unknown';\nconst job = $('Build Prompt').first().json; // may not match per-item due to fanout; read from inp instead\nconst mode = inp.mode || job.mode || 'FALLBACK';\nconst kind = inp.kind || job.kind || 'news';\nconst srcItem = inp.item || job.item || {};\n\nlet pkgRaw = null;\nconst choices = (inp.choices) ? inp.choices : ((inp.body && inp.body.choices) ? inp.body.choices : null);\nif (choices && choices[0]) {\n  const content = choices[0].message?.content;\n  pkgRaw = safeParse(content);\n}\n\nif (!pkgRaw) {\n  // LLM failed or bad JSON — produce a minimal discarded package\n  return [{\n    json: {\n      content_id: `c_${run_id}_${Date.now()}_${Math.floor(Math.random()*1000)}`,\n      run_id,\n      item_id: srcItem.item_id || null,\n      mode,\n      platform_pair: 'instagram+linkedin',\n      status: 'discarded',\n      confidence_label: 'low',\n      topic: srcItem.title || srcItem.fallback_title || 'n/a',\n      why_it_matters: '',\n      why_it_can_work: '',\n      recording_time_estimate: '',\n      instagram: { hook:'', script:'', caption:'', cta:'' },\n      linkedin: { post:'', take_personal:'' },\n      source_name: srcItem.source_name || (kind==='fallback' ? 'internal_fallback' : ''),\n      source_url: srcItem.url || '',\n      prompt_version: $('Config').first().json.promptVersion || 'v1',\n      qc_reason: 'invalid_llm_json_or_no_response'\n    }\n  }];\n}\n\nconst cs = pkgRaw.claim_sheet || {};\nconst ig = pkgRaw.instagram || {};\nconst li = pkgRaw.linkedin || {};\nconst qc = pkgRaw.qc || {};\nconst meta = pkgRaw.meta || {};\n\n// Hard rule: if leak and leak_labeling_ok !== true → downgrade\nlet status = qc.status || 'raw';\nlet confidence = qc.confidence_label || 'low';\nif (cs.is_leak === true && qc.leak_labeling_ok !== true) status = 'review';\nif (confidence === 'low' && status === 'ready') status = 'review';\n\nreturn [{\n  json: {\n    content_id: `c_${run_id}_${Date.now()}_${Math.floor(Math.random()*1000)}`,\n    run_id,\n    item_id: srcItem.item_id || null,\n    mode,\n    platform_pair: 'instagram+linkedin',\n    status,\n    confidence_label: confidence,\n    topic: meta.topic || srcItem.title || srcItem.fallback_title || 'n/a',\n    why_it_matters: meta.why_it_matters || cs.why_it_matters || '',\n    why_it_can_work: meta.why_it_can_work || '',\n    recording_time_estimate: meta.recording_time_estimate || '30-40s',\n    instagram: {\n      hook: ig.hook || '',\n      script: ig.script || '',\n      caption: ig.caption || '',\n      cta: ig.cta || ''\n    },\n    linkedin: {\n      post: li.post || '',\n      take_personal: li.take_personal || ''\n    },\n    source_name: srcItem.source_name || (kind==='fallback' ? 'internal_fallback' : ''),\n    source_url: srcItem.url || '',\n    prompt_version: $('Config').first().json.promptVersion || 'v1',\n    claim_sheet: cs\n  }\n}];"
+      },
+      "id": "parse",
+      "name": "Parse & Assemble",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all packages (from the per-item fanout) into a single output\nconst pkgs = $input.all().map(i => i.json);\nconst first = pkgs[0] || {};\nconst run_id = first.run_id || $('Prepare Jobs').first().json.run_id;\nconst mode = first.mode || $('Prepare Jobs').first().json.mode;\nconst upstream = $('When Executed By Workflow').first().json || {};\n\n// Build sheet rows for content_history\nconst headers = ['content_id','run_id','item_id','mode','platform_pair','status','confidence_label','instagram_hook','instagram_script','instagram_caption','instagram_cta','linkedin_post','source_name','source_url','prompt_version'];\nconst rows = pkgs.map(p => [\n  p.content_id, p.run_id, p.item_id || '', p.mode, p.platform_pair, p.status, p.confidence_label,\n  (p.instagram||{}).hook || '', (p.instagram||{}).script || '', (p.instagram||{}).caption || '', (p.instagram||{}).cta || '',\n  (p.linkedin||{}).post || '', p.source_name || '', p.source_url || '', p.prompt_version || ''\n]);\n\nreturn [{\n  json: {\n    spreadsheetId: '1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk',\n    range: 'content_history!A:O',\n    values: rows,\n    packages: pkgs,\n    run_id,\n    mode,\n    shortlist: upstream.shortlist || [],\n    meta: upstream.meta || {},\n    note: upstream.note || '',\n    started_at: upstream.started_at || new Date().toISOString()\n  }\n}];"
+      },
+      "id": "aggregate",
+      "name": "Aggregate Packages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "has-rows",
+              "leftValue": "={{ $json.values.length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-any",
+      "name": "Any Package?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1680, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.range) }}:append",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "valueInputOption", "value": "USER_ENTERED" },
+            { "name": "insertDataOption", "value": "INSERT_ROWS" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ range: $json.range, majorDimension: 'ROWS', values: $json.values }) }}",
+        "options": {}
+      },
+      "id": "append-history",
+      "name": "Append content_history",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1920, -120],
+      "credentials": {
+        "googleApi": {
+          "id": "VjDfIwHmyAdswLjT",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $workflow.deliveryWorkflowId || 'PLACEHOLDER_WF3_ID' }}",
+        "mode": "each",
+        "options": {}
+      },
+      "id": "call-wf3",
+      "name": "Call Delivery Workflow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [2160, 0],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Passthrough to expose the final packages to whoever called this WF (WF1).\n// The caller can then trigger WF3 directly. Returns one item containing the full envelope.\nreturn [{ json: $json }];"
+      },
+      "id": "return",
+      "name": "Return Envelope",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 120]
+    }
+  ],
+  "connections": {
+    "When Executed By Workflow": { "main": [[{ "node": "Config", "type": "main", "index": 0 }]] },
+    "Config": { "main": [[{ "node": "Prepare Jobs", "type": "main", "index": 0 }]] },
+    "Prepare Jobs": { "main": [[{ "node": "Build Prompt", "type": "main", "index": 0 }]] },
+    "Build Prompt": { "main": [[{ "node": "OpenRouter Generate", "type": "main", "index": 0 }]] },
+    "OpenRouter Generate": { "main": [[{ "node": "Parse & Assemble", "type": "main", "index": 0 }], [{ "node": "Parse & Assemble", "type": "main", "index": 0 }]] },
+    "Parse & Assemble": { "main": [[{ "node": "Aggregate Packages", "type": "main", "index": 0 }]] },
+    "Aggregate Packages": { "main": [[{ "node": "Any Package?", "type": "main", "index": 0 }]] },
+    "Any Package?": {
+      "main": [
+        [{ "node": "Append content_history", "type": "main", "index": 0 }],
+        [{ "node": "Return Envelope", "type": "main", "index": 0 }]
+      ]
+    },
+    "Append content_history": { "main": [[{ "node": "Return Envelope", "type": "main", "index": 0 }]] }
+  }
+}
