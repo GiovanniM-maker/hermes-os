@@ -35,19 +35,25 @@ Telegram bot: `@juan_ai_content_bot` (id 8633658100).
 - Tabs are seeded for `source_registry` (14 curated sources) and
   `fallback_library` (7 evergreen topics).
 
-## Required manual steps before first run
+## Status
 
-1. **Share the target spreadsheet with the Google service account** used by
-   credential `googleApi` (`VjDfIwHmyAdswLjT`). Open n8n → Credentials →
-   _Google Sheets account_ → copy the `email` → share the sheet (Editor).
-2. **Send `/start` to `@juan_ai_content_bot`** so a chat exists, then retrieve
-   the `chat_id` from `https://api.telegram.org/bot<TOKEN>/getUpdates`.
-3. Put the `chat_id` into the `Config` node of
-   `AI_Daily_Delivery_And_Logging` (field `telegramChatId`).
-4. Open `AI_Daily_Setup_Sheet` in the n8n UI and click **Execute Workflow**
-   (or POST the webhook; see below). It creates tabs and headers and seeds
-   `source_registry` + `fallback_library`.
-5. Activate `AI_Daily_Intelligence`. It runs Mon–Fri 08:00 Europe/Rome.
+Pipeline end-to-end validated. Last test run produced:
+- 14 sources read, 1923 items fetched, deduped into 30 ranked items
+- Mode `FALLBACK` triggered (no item met publishable thresholds)
+- 3 content packages generated from `fallback_library`
+- 4 Telegram messages delivered (1 digest + 3 packages) to chat `5753011656`
+
+## Credentials wired
+
+| Credential       | n8n ID              | Purpose              |
+|------------------|---------------------|----------------------|
+| googleApi        | VjDfIwHmyAdswLjT    | Google Sheets (SA)   |
+| openRouterApi    | mpMk74pCZg2Efk6i    | LLM scoring + gen    |
+| telegramApi      | LB71gUXSNc4EH9v1    | Content Bot          |
+
+Service-account email is already shared on the target spreadsheet, so
+native Google Sheets nodes (used for all Sheets reads/writes) work
+out of the box.
 
 ### Triggering the setup workflow
 
