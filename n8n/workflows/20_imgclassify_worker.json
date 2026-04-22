@@ -29,7 +29,6 @@
             { "id": "c1", "name": "spreadsheetId",  "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk", "type": "string" },
             { "id": "c2", "name": "sheetName",       "value": "image_classification",                     "type": "string" },
             { "id": "c3", "name": "geminiModel",     "value": "gemini-2.5-flash-lite",                    "type": "string" },
-            { "id": "c4", "name": "geminiKey",       "value": "GEMINI_KEY_REDACTED",  "type": "string" },
             { "id": "c6", "name": "files",           "value": "={{ $json.body?.files ?? $json.files ?? [] }}",   "type": "array" },
             { "id": "c7", "name": "shard_id",        "value": "={{ $json.body?.shard_id ?? $json.shard_id ?? 'manual' }}", "type": "string" },
             { "id": "c8", "name": "run_id",          "value": "={{ $json.body?.run_id ?? $json.run_id ?? ('run_' + $now.toMillis()) }}", "type": "string" }
@@ -100,7 +99,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Build the Gemini generateContent body (per item) with structured output + classification prompt.\nconst cfg = $('Config').first().json;\nconst inp = $json;\nif (inp._download_error) {\n  return { json: { ...inp, _skip_llm: true } };\n}\nconst prompt = `RUOLO\\nSei un sistema esperto nell'analisi di immagini di confezioni di cibo o bevande in contesto e-commerce.\\n\\nOBIETTIVO\\nDevi classificare l'orientamento della confezione nella foto scegliendo una sola tra queste categorie: frontale, Di 3 quarti verso sinistra, Di 3 quarti verso destra, posteriore, Dall'alto, Dal basso.\\n\\nDEFINIZIONI\\n- frontale: logo completamente visibile, centrato, lati assenti o minimi.\\n- Di 3 quarti verso sinistra: logo visibile ma non perfettamente centrato; parte laterale sinistra >= 15%.\\n- Di 3 quarti verso destra: come sopra ma lato destro.\\n- posteriore: logo non visibile, presenti informazioni nutrizionali / barcode / retro etichetta.\\n- Dall'alto: visibile tappo o apertura, superficie sotto, testi poco leggibili.\\n- Dal basso: visibile parte inferiore, oggetto puo sembrare sospeso.\\n\\nREGOLE\\n- Scegli una sola categoria, non inventare.\\n- Usa '3 quarti' solo se il lato e chiaramente visibile (>=15%); se minimo -> frontale.\\n- Logo centrato non distorto -> frontale.\\n- Logo non visibile -> posteriore.\\n- Angolo verticale evidente -> Dall'alto o Dal basso.\\n- In dubbio tra frontale e 3 quarti -> frontale.\\n\\nCONFIDENCE 0-100: 90-100 molto sicuro, 70-89 abbastanza sicuro, 50-69 incerto, <50 molto incerto.\\nNEEDS_HUMAN_REVIEW: true se confidence < 70, false se >= 70.`;\nconst body = {\n  contents: [{\n    parts: [\n      { inline_data: { mime_type: inp.imageMimeType, data: inp.imageBase64 } },\n      { text: prompt }\n    ]\n  }],\n  generationConfig: {\n    temperature: 0,\n    maxOutputTokens: 256,\n    responseMimeType: 'application/json',\n    responseJsonSchema: {\n      type: 'object',\n      properties: {\n        output:             { type: 'string', enum: ['frontale','Di 3 quarti verso sinistra','Di 3 quarti verso destra','posteriore',\"Dall'alto\",'Dal basso'] },\n        confidence:         { type: 'integer', minimum: 0, maximum: 100 },\n        needs_human_review: { type: 'boolean' }\n      },\n      required: ['output','confidence','needs_human_review']\n    }\n  }\n};\nreturn { json: { ...inp, _gemini_body: body, _model: cfg.geminiModel, _key: cfg.geminiKey } };",
+        "jsCode": "// Build the Gemini generateContent body (per item) with structured output + classification prompt.\nconst cfg = $('Config').first().json;\nconst inp = $json;\nif (inp._download_error) {\n  return { json: { ...inp, _skip_llm: true } };\n}\nconst prompt = `RUOLO\\nSei un sistema esperto nell'analisi di immagini di confezioni di cibo o bevande in contesto e-commerce.\\n\\nOBIETTIVO\\nDevi classificare l'orientamento della confezione nella foto scegliendo una sola tra queste categorie: frontale, Di 3 quarti verso sinistra, Di 3 quarti verso destra, posteriore, Dall'alto, Dal basso.\\n\\nDEFINIZIONI\\n- frontale: logo completamente visibile, centrato, lati assenti o minimi.\\n- Di 3 quarti verso sinistra: logo visibile ma non perfettamente centrato; parte laterale sinistra >= 15%.\\n- Di 3 quarti verso destra: come sopra ma lato destro.\\n- posteriore: logo non visibile, presenti informazioni nutrizionali / barcode / retro etichetta.\\n- Dall'alto: visibile tappo o apertura, superficie sotto, testi poco leggibili.\\n- Dal basso: visibile parte inferiore, oggetto puo sembrare sospeso.\\n\\nREGOLE\\n- Scegli una sola categoria, non inventare.\\n- Usa '3 quarti' solo se il lato e chiaramente visibile (>=15%); se minimo -> frontale.\\n- Logo centrato non distorto -> frontale.\\n- Logo non visibile -> posteriore.\\n- Angolo verticale evidente -> Dall'alto o Dal basso.\\n- In dubbio tra frontale e 3 quarti -> frontale.\\n\\nCONFIDENCE 0-100: 90-100 molto sicuro, 70-89 abbastanza sicuro, 50-69 incerto, <50 molto incerto.\\nNEEDS_HUMAN_REVIEW: true se confidence < 70, false se >= 70.`;\nconst body = {\n  contents: [{\n    parts: [\n      { inline_data: { mime_type: inp.imageMimeType, data: inp.imageBase64 } },\n      { text: prompt }\n    ]\n  }],\n  generationConfig: {\n    temperature: 0,\n    maxOutputTokens: 256,\n    responseMimeType: 'application/json',\n    responseJsonSchema: {\n      type: 'object',\n      properties: {\n        output:             { type: 'string', enum: ['frontale','Di 3 quarti verso sinistra','Di 3 quarti verso destra','posteriore',\"Dall'alto\",'Dal basso'] },\n        confidence:         { type: 'integer', minimum: 0, maximum: 100 },\n        needs_human_review: { type: 'boolean' }\n      },\n      required: ['output','confidence','needs_human_review']\n    }\n  }\n};\nreturn { json: { ...inp, _gemini_body: body, _model: cfg.geminiModel } };",
         "mode": "runOnceForEachItem"
       },
       "id": "build-prompt",
@@ -112,7 +111,9 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $json._model }}:generateContent?key={{ $json._key }}",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $json._model }}:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json._gemini_body) }}",
@@ -126,6 +127,9 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [1680, 120],
+      "credentials": {
+        "googlePalmApi": { "id": "hDQOMRtCGOdU7Wqp", "name": "Google Gemini(PaLM) Api account" }
+      },
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
