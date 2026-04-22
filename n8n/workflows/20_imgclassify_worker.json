@@ -1,0 +1,195 @@
+{
+  "name": "ImgClassify_Worker",
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Rome",
+    "executionTimeout": 3600
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "imgclassify-worker",
+        "responseMode": "onReceived",
+        "responseCode": 202,
+        "responseData": "noData",
+        "options": {}
+      },
+      "id": "trg",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "imgclassify-worker-webhook-2026"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "c1", "name": "spreadsheetId",  "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk", "type": "string" },
+            { "id": "c2", "name": "sheetName",       "value": "image_classification",                     "type": "string" },
+            { "id": "c3", "name": "geminiModel",     "value": "gemini-2.5-flash-lite",                    "type": "string" },
+            { "id": "c4", "name": "geminiKey",       "value": "GEMINI_KEY_REDACTED",  "type": "string" },
+            { "id": "c6", "name": "files",           "value": "={{ $json.body?.files ?? $json.files ?? [] }}",   "type": "array" },
+            { "id": "c7", "name": "shard_id",        "value": "={{ $json.body?.shard_id ?? $json.shard_id ?? 'manual' }}", "type": "string" },
+            { "id": "c8", "name": "run_id",          "value": "={{ $json.body?.run_id ?? $json.run_id ?? ('run_' + $now.toMillis()) }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cfg",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per file (the SplitInBatches downstream will group them in chunks of batchSize).\nconst cfg = $input.first().json;\nconst files = Array.isArray(cfg.files) ? cfg.files : [];\nreturn files.map(f => ({ json: { id: f.id, name: f.name, mimeType: f.mimeType || 'image/jpeg', shard_id: cfg.shard_id, run_id: cfg.run_id } }));"
+      },
+      "id": "fanout",
+      "name": "Fan Out Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "batchSize": 50,
+        "options": {}
+      },
+      "id": "loop",
+      "name": "Batch Loop",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [720, 0]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "download",
+      "name": "Drive Download",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [960, 120],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "ZVxONwG8Bv78yQ5L", "name": "Google Drive account" }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Convert each binary into base64 + re-attach original file metadata\n// (Drive Download replaces the item, so we look up {id,name,shard_id,run_id}\n//  from Fan Out Files via itemMatching on the paired index).\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const it = items[i];\n  let orig = {};\n  try { orig = $('Fan Out Files').itemMatching(i).json || {}; } catch(e) { orig = it.json || {}; }\n  let imageBase64 = null, imageMimeType = null;\n  try {\n    const buf = await this.helpers.getBinaryDataBuffer(i, 'data');\n    imageBase64 = buf.toString('base64');\n    imageMimeType = (it.binary && it.binary.data && it.binary.data.mimeType) || orig.mimeType || 'image/jpeg';\n  } catch(e) {\n    out.push({ json: { ...orig, _download_error: String(e) } });\n    continue;\n  }\n  out.push({ json: { ...orig, imageBase64, imageMimeType } });\n}\nreturn out;"
+      },
+      "id": "to-b64",
+      "name": "To Base64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 120]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the Gemini generateContent body (per item) with structured output + classification prompt.\nconst cfg = $('Config').first().json;\nconst inp = $json;\nif (inp._download_error) {\n  return { json: { ...inp, _skip_llm: true } };\n}\nconst prompt = `RUOLO\\nSei un sistema esperto nell'analisi di immagini di confezioni di cibo o bevande in contesto e-commerce.\\n\\nOBIETTIVO\\nDevi classificare l'orientamento della confezione nella foto scegliendo una sola tra queste categorie: frontale, Di 3 quarti verso sinistra, Di 3 quarti verso destra, posteriore, Dall'alto, Dal basso.\\n\\nDEFINIZIONI\\n- frontale: logo completamente visibile, centrato, lati assenti o minimi.\\n- Di 3 quarti verso sinistra: logo visibile ma non perfettamente centrato; parte laterale sinistra >= 15%.\\n- Di 3 quarti verso destra: come sopra ma lato destro.\\n- posteriore: logo non visibile, presenti informazioni nutrizionali / barcode / retro etichetta.\\n- Dall'alto: visibile tappo o apertura, superficie sotto, testi poco leggibili.\\n- Dal basso: visibile parte inferiore, oggetto puo sembrare sospeso.\\n\\nREGOLE\\n- Scegli una sola categoria, non inventare.\\n- Usa '3 quarti' solo se il lato e chiaramente visibile (>=15%); se minimo -> frontale.\\n- Logo centrato non distorto -> frontale.\\n- Logo non visibile -> posteriore.\\n- Angolo verticale evidente -> Dall'alto o Dal basso.\\n- In dubbio tra frontale e 3 quarti -> frontale.\\n\\nCONFIDENCE 0-100: 90-100 molto sicuro, 70-89 abbastanza sicuro, 50-69 incerto, <50 molto incerto.\\nNEEDS_HUMAN_REVIEW: true se confidence < 70, false se >= 70.`;\nconst body = {\n  contents: [{\n    parts: [\n      { inline_data: { mime_type: inp.imageMimeType, data: inp.imageBase64 } },\n      { text: prompt }\n    ]\n  }],\n  generationConfig: {\n    temperature: 0,\n    maxOutputTokens: 256,\n    responseMimeType: 'application/json',\n    responseJsonSchema: {\n      type: 'object',\n      properties: {\n        output:             { type: 'string', enum: ['frontale','Di 3 quarti verso sinistra','Di 3 quarti verso destra','posteriore',\"Dall'alto\",'Dal basso'] },\n        confidence:         { type: 'integer', minimum: 0, maximum: 100 },\n        needs_human_review: { type: 'boolean' }\n      },\n      required: ['output','confidence','needs_human_review']\n    }\n  }\n};\nreturn { json: { ...inp, _gemini_body: body, _model: cfg.geminiModel, _key: cfg.geminiKey } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "build-prompt",
+      "name": "Build Gemini Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 120]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $json._model }}:generateContent?key={{ $json._key }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._gemini_body) }}",
+        "options": {
+          "timeout": 60000,
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "id": "llm",
+      "name": "Gemini Classify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 120],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Per-item parser: emits exactly one row formatted for the sheet.\nfunction safeParse(s){\n  if (!s) return null;\n  let t = String(s).trim();\n  const m = t.match(/```(?:json)?\\s*([\\s\\S]*?)```/i);\n  if (m) t = m[1].trim();\n  try { return JSON.parse(t); } catch(e){}\n  const a=t.indexOf('{'),b=t.lastIndexOf('}');\n  if (a>=0&&b>a){ try{ return JSON.parse(t.slice(a,b+1)); }catch(e){} }\n  return null;\n}\nconst VALID = ['frontale','Di 3 quarti verso sinistra','Di 3 quarti verso destra','posteriore',\"Dall'alto\",'Dal basso'];\nconst inp = $json;\nlet orig = {};\ntry { orig = $('Fan Out Files').itemMatching($itemIndex).json || {}; } catch(e) { orig = {}; }\nconst id = orig.id || inp.id || '';\nconst name = orig.name || inp.name || '';\nconst run_id = orig.run_id || inp.run_id || '';\nconst shard_id = orig.shard_id || inp.shard_id || '';\nlet output = '', confidence = 0, needs_human_review = true, parsing_error = null;\nif (inp._download_error) {\n  output = 'ERRORE_DOWNLOAD'; parsing_error = inp._download_error;\n} else {\n  const respRoot = inp.candidates ? inp : (inp.body || {});\n  const choices = respRoot.candidates || [];\n  let rawText = '';\n  if (choices[0] && choices[0].content && choices[0].content.parts) {\n    rawText = (choices[0].content.parts.map(p => p.text || '').join(' ') || '').trim();\n  }\n  const parsed = safeParse(rawText);\n  if (parsed && typeof parsed === 'object') {\n    output = String(parsed.output ?? parsed.orientamento ?? '').trim();\n    confidence = Math.max(0, Math.min(100, Number(parsed.confidence ?? 0) || 0));\n    needs_human_review = (typeof parsed.needs_human_review === 'boolean') ? parsed.needs_human_review : (confidence < 70);\n    if (!VALID.includes(output)) {\n      parsing_error = `categoria_non_valida:${output}`;\n      output = 'ERRORE_VALIDAZIONE';\n      confidence = 0; needs_human_review = true;\n    }\n  } else {\n    parsing_error = 'json_malformato';\n    output = 'NON_DETERMINATO';\n  }\n}\nreturn { json: {\n  ID: id,\n  'Nome immagine': name,\n  Classificazione: output,\n  Confidence: confidence,\n  Cluster: needs_human_review ? 'review' : 'auto',\n  run_id, shard_id,\n  parsing_error\n}};"
+      },
+      "id": "parse",
+      "name": "Parse Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 120]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.spreadsheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheetName }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "append",
+      "name": "Batch Append",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [2160, 120],
+      "credentials": {
+        "googleApi": { "id": "VjDfIwHmyAdswLjT", "name": "Google Sheets account" }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook":          { "main": [[{ "node": "Config", "type": "main", "index": 0 }]] },
+    "Config":           { "main": [[{ "node": "Fan Out Files", "type": "main", "index": 0 }]] },
+    "Fan Out Files":    { "main": [[{ "node": "Batch Loop", "type": "main", "index": 0 }]] },
+    "Batch Loop":       { "main": [[], [{ "node": "Drive Download", "type": "main", "index": 0 }]] },
+    "Drive Download":   { "main": [[{ "node": "To Base64", "type": "main", "index": 0 }]] },
+    "To Base64":        { "main": [[{ "node": "Build Gemini Body", "type": "main", "index": 0 }]] },
+    "Build Gemini Body":{ "main": [[{ "node": "Gemini Classify", "type": "main", "index": 0 }]] },
+    "Gemini Classify":  { "main": [[{ "node": "Parse Result", "type": "main", "index": 0 }]] },
+    "Parse Result":     { "main": [[{ "node": "Batch Append", "type": "main", "index": 0 }]] },
+    "Batch Append":     { "main": [[{ "node": "Batch Loop", "type": "main", "index": 0 }]] }
+  }
+}

@@ -1,0 +1,183 @@
+{
+  "name": "ImgClassify_Orchestrator",
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Rome",
+    "executionTimeout": 1800
+  },
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trg",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "c1", "name": "folderId",         "value": "1vUrxw22LWZkkeDwGNO1P4sc8FK3Z3v2g",          "type": "string" },
+            { "id": "c2", "name": "spreadsheetId",    "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk", "type": "string" },
+            { "id": "c3", "name": "sheetName",        "value": "image_classification",                      "type": "string" },
+            { "id": "c4", "name": "workerWebhookUrl", "value": "https://giovannimavilla.app.n8n.cloud/webhook/imgclassify-worker", "type": "string" },
+            { "id": "c5", "name": "shardSize",        "value": 500,                                           "type": "number" },
+            { "id": "c6", "name": "dryRunLimit",      "value": 0,                                             "type": "number" },
+            { "id": "c7", "name": "run_id",           "value": "={{ 'run_' + $now.toMillis() }}",             "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cfg",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "create",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.spreadsheetId }}",
+          "mode": "id"
+        },
+        "title": "={{ $('Config').first().json.sheetName }}",
+        "options": {}
+      },
+      "id": "ensure-tab",
+      "name": "Ensure Tab Exists",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [480, 0],
+      "credentials": {
+        "googleApi": { "id": "VjDfIwHmyAdswLjT", "name": "Google Sheets account" }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "={{ \"'\" + $('Config').first().json.folderId + \"' in parents and trashed = false and mimeType contains 'image/'\" }}",
+        "returnAll": true,
+        "filter": {},
+        "options": {}
+      },
+      "id": "list",
+      "name": "List Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [720, 0],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "ZVxONwG8Bv78yQ5L", "name": "Google Drive account" }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.spreadsheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheetName }}",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "read-processed",
+      "name": "Read Processed",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [960, 0],
+      "credentials": {
+        "googleApi": { "id": "VjDfIwHmyAdswLjT", "name": "Google Sheets account" }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Diff: all image files in folder MINUS those already in the sheet → shard.\nconst cfg = $('Config').first().json;\nconst folderItems = $('List Folder').all().map(i => i.json).filter(f => f && f.id);\nconst processedIds = new Set(\n  $('Read Processed').all().map(i => i.json)\n    .map(r => r.ID || r.id || r.fileId || '')\n    .filter(Boolean)\n);\nlet newFiles = folderItems\n  .filter(f => !processedIds.has(f.id))\n  .map(f => ({ id: f.id, name: f.name, mimeType: f.mimeType || 'image/jpeg' }));\n\nif (cfg.dryRunLimit && cfg.dryRunLimit > 0) newFiles = newFiles.slice(0, cfg.dryRunLimit);\n\nconst shardSize = Number(cfg.shardSize) || 500;\nconst shards = [];\nfor (let i = 0; i < newFiles.length; i += shardSize) {\n  shards.push(newFiles.slice(i, i + shardSize));\n}\n\n// Emit one item per shard so the next node can loop and POST.\nreturn shards.map((files, idx) => ({ json: {\n  shard_idx: idx,\n  shard_id: `${cfg.run_id}_shard_${String(idx).padStart(3,'0')}`,\n  run_id: cfg.run_id,\n  files,\n  total_files: newFiles.length,\n  total_shards: shards.length,\n  folder_total: folderItems.length,\n  already_processed: processedIds.size\n}}));"
+      },
+      "id": "plan",
+      "name": "Plan Shards",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 0]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-shard",
+      "name": "Shard Loop",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1440, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.workerWebhookUrl }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ run_id: $json.run_id, shard_id: $json.shard_id, files: $json.files }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "dispatch",
+      "name": "Dispatch Shard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 120],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "id": "stagger",
+      "name": "Stagger 1s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1920, 120],
+      "webhookId": "stagger-wait-imgclassify"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Final summary after all shards dispatched.\nconst plan = $('Plan Shards').all().map(i => i.json);\nconst cfg = $('Config').first().json;\nconst first = plan[0] || {};\nreturn [{ json: {\n  status: 'dispatched',\n  run_id: cfg.run_id,\n  folder_total: first.folder_total || 0,\n  already_processed: first.already_processed || 0,\n  new_files: first.total_files || 0,\n  total_shards: first.total_shards || 0,\n  worker_url: cfg.workerWebhookUrl,\n  note: 'Workers run async; monitor via n8n execution list + destination sheet.'\n}}];"
+      },
+      "id": "done",
+      "name": "Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, -80]
+    }
+  ],
+  "connections": {
+    "Manual Trigger":    { "main": [[{ "node": "Config", "type": "main", "index": 0 }]] },
+    "Config":            { "main": [[{ "node": "Ensure Tab Exists", "type": "main", "index": 0 }]] },
+    "Ensure Tab Exists": { "main": [[{ "node": "List Folder", "type": "main", "index": 0 }]] },
+    "List Folder":       { "main": [[{ "node": "Read Processed", "type": "main", "index": 0 }]] },
+    "Read Processed":    { "main": [[{ "node": "Plan Shards", "type": "main", "index": 0 }]] },
+    "Plan Shards":       { "main": [[{ "node": "Shard Loop", "type": "main", "index": 0 }]] },
+    "Shard Loop":        { "main": [[{ "node": "Done", "type": "main", "index": 0 }], [{ "node": "Dispatch Shard", "type": "main", "index": 0 }]] },
+    "Dispatch Shard":    { "main": [[{ "node": "Stagger 1s", "type": "main", "index": 0 }]] },
+    "Stagger 1s":     { "main": [[{ "node": "Shard Loop", "type": "main", "index": 0 }]] }
+  }
+}
