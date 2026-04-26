@@ -1,0 +1,9 @@
+# Mai committare niente di questi file: contengono credenziali.
+.env
+client_secrets.json
+token.json
+logs/
+__pycache__/
+*.pyc
+venv/
+.venv/
