@@ -1,0 +1,110 @@
+{
+  "name": "AI_Daily_Extend_Sources",
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Rome"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-daily-extend-sources",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "trg-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "b2c3d4e5-6f7a-8b9c-0d1e-2f3a4b5c6d7e"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "source_registry",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "read-existing",
+      "name": "Read existing sources",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [240, 0],
+      "credentials": {
+        "googleApi": { "id": "VjDfIwHmyAdswLjT", "name": "Google Sheets account" }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Candidate new sources. Skip any whose source_id is already present.\nconst CANDIDATES = [\n  { source_id:'src_aws_ml',      name:'AWS Machine Learning Blog',  url:'https://aws.amazon.com/blogs/machine-learning/feed/',                       type:'rss', tier:'tier1', enabled:'true', topic_scope:'business_ai',              trust_score:0.85, notes:'Official' },\n  { source_id:'src_cohere',      name:'Cohere Blog',                url:'https://cohere.com/blog/rss.xml',                                            type:'rss', tier:'tier1', enabled:'true', topic_scope:'generative_ai|business_ai', trust_score:0.85, notes:'Official' },\n  { source_id:'src_databricks',  name:'Databricks Blog',            url:'https://www.databricks.com/feed',                                            type:'rss', tier:'tier1', enabled:'true', topic_scope:'business_ai',              trust_score:0.8,  notes:'Official' },\n  { source_id:'src_stability',   name:'Stability AI News',          url:'https://stability.ai/news/rss.xml',                                          type:'rss', tier:'tier1', enabled:'true', topic_scope:'generative_ai',            trust_score:0.75, notes:'Official' },\n  { source_id:'src_ieee_ai',     name:'IEEE Spectrum AI',           url:'https://spectrum.ieee.org/feeds/topic/artificial-intelligence.rss',         type:'rss', tier:'tier2', enabled:'true', topic_scope:'generative_ai|business_ai', trust_score:0.8,  notes:'Trusted media' },\n  { source_id:'src_latent_space',name:'Latent Space',               url:'https://www.latent.space/feed',                                              type:'rss', tier:'tier2', enabled:'true', topic_scope:'generative_ai|business_ai', trust_score:0.75, notes:'Practitioner analysis' },\n  { source_id:'src_import_ai',   name:'Import AI (Jack Clark)',     url:'https://importai.substack.com/feed',                                         type:'rss', tier:'tier2', enabled:'true', topic_scope:'generative_ai|business_ai', trust_score:0.85, notes:'Top analyst newsletter' },\n  { source_id:'src_ai_news',     name:'AI News',                    url:'https://www.artificialintelligence-news.com/feed/',                          type:'rss', tier:'tier2', enabled:'true', topic_scope:'business_ai',              trust_score:0.7,  notes:'Trusted media' },\n  { source_id:'src_marktechpost',name:'MarkTechPost',               url:'https://www.marktechpost.com/feed/',                                         type:'rss', tier:'tier2', enabled:'true', topic_scope:'generative_ai',            trust_score:0.65, notes:'Trusted media' },\n  { source_id:'src_crunchbase_ai',name:'Crunchbase News \\u2014 AI', url:'https://news.crunchbase.com/sections/ai/feed/',                              type:'rss', tier:'tier2', enabled:'true', topic_scope:'business_ai',              trust_score:0.75, notes:'AI funding/M&A signal' },\n  { source_id:'src_simon_w',     name:'Simon Willison',             url:'https://simonwillison.net/atom/everything/',                                  type:'rss', tier:'tier2', enabled:'true', topic_scope:'generative_ai',            trust_score:0.8,  notes:'Engineer/practitioner blog' },\n  { source_id:'src_arstechnica_ai', name:'Ars Technica AI',         url:'https://feeds.arstechnica.com/arstechnica/ai',                               type:'rss', tier:'tier2', enabled:'true', topic_scope:'generative_ai|business_ai', trust_score:0.8,  notes:'Trusted media' },\n  { source_id:'src_wired_ai',    name:'Wired AI',                   url:'https://www.wired.com/feed/tag/ai/latest/rss',                               type:'rss', tier:'tier2', enabled:'true', topic_scope:'generative_ai|business_ai', trust_score:0.75, notes:'Trusted media' },\n  { source_id:'src_xai',         name:'xAI News',                   url:'https://x.ai/news',                                                          type:'html', tier:'tier1', enabled:'true', topic_scope:'generative_ai',            trust_score:0.75, notes:'Official \\u2014 HTML scrape' },\n  { source_id:'src_apple_ml',    name:'Apple Machine Learning',     url:'https://machinelearning.apple.com/rss.xml',                                  type:'rss', tier:'tier1', enabled:'true', topic_scope:'generative_ai',            trust_score:0.75, notes:'Official' },\n  { source_id:'src_a16z',        name:'a16z',                       url:'https://a16z.com/feed/',                                                     type:'rss', tier:'tier2', enabled:'true', topic_scope:'business_ai',              trust_score:0.7,  notes:'VC perspective' },\n  { source_id:'src_sequoia',     name:'Sequoia Capital',            url:'https://www.sequoiacap.com/feed/',                                           type:'rss', tier:'tier2', enabled:'true', topic_scope:'business_ai',              trust_score:0.7,  notes:'VC perspective' },\n  { source_id:'src_perplexity',  name:'Perplexity Blog',            url:'https://www.perplexity.ai/hub/blog',                                         type:'html', tier:'tier1', enabled:'true', topic_scope:'generative_ai',            trust_score:0.7,  notes:'Official \\u2014 HTML scrape' }\n];\nconst existingIds = new Set($input.all().map(i => i.json.source_id).filter(Boolean));\nconst toAdd = CANDIDATES.filter(c => !existingIds.has(c.source_id));\nreturn toAdd.map(r => ({ json: r }));"
+      },
+      "id": "filter-new",
+      "name": "Filter New Only",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "source_registry",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "append-new",
+      "name": "Append New Sources",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [720, 0],
+      "credentials": {
+        "googleApi": { "id": "VjDfIwHmyAdswLjT", "name": "Google Sheets account" }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn [{ json: { status:'ok', appended: items.length, source_ids: items.map(i => (i.json && (i.json.source_id || (i.json.fields && i.json.fields.source_id))) || null) } }];"
+      },
+      "id": "done",
+      "name": "Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 0]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger":      { "main": [[{ "node": "Read existing sources", "type": "main", "index": 0 }]] },
+    "Read existing sources":{ "main": [[{ "node": "Filter New Only",       "type": "main", "index": 0 }]] },
+    "Filter New Only":      { "main": [[{ "node": "Append New Sources",    "type": "main", "index": 0 }]] },
+    "Append New Sources":   { "main": [[{ "node": "Done",                  "type": "main", "index": 0 }]] }
+  }
+}

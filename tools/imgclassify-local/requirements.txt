@@ -1,0 +1,6 @@
+aiohttp>=3.9
+google-api-python-client>=2.100
+google-auth>=2.23
+google-auth-oauthlib>=1.1
+python-dotenv>=1.0
+tqdm>=4.66

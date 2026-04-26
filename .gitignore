@@ -25,3 +25,11 @@ venv/
 
 # Logs
 *.log
+
+# Local image classifier — secrets must NEVER be committed
+tools/imgclassify-local/.env
+tools/imgclassify-local/client_secrets.json
+tools/imgclassify-local/token.json
+tools/imgclassify-local/logs/
+tools/imgclassify-local/venv/
+tools/imgclassify-local/__pycache__/

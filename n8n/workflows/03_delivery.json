@@ -1,0 +1,121 @@
+{
+  "name": "AI_Daily_Delivery_And_Logging",
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Rome"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "trg-ewf",
+      "name": "When Executed By Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "cfg1", "name": "spreadsheetId", "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk", "type": "string" },
+            { "id": "cfg2", "name": "telegramChatId", "value": "5753011656", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cfg",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the digest text and per-package texts\nconst input = $('When Executed By Workflow').first().json;\nconst run_id = input.run_id || 'unknown';\nconst mode = input.mode || 'UNKNOWN';\nconst shortlist = Array.isArray(input.shortlist) ? input.shortlist : [];\nconst packages = Array.isArray(input.content_packages) ? input.content_packages : [];\nconst meta = input.meta || {};\nconst note = input.note || '';\n\nconst todayIT = new Intl.DateTimeFormat('it-IT', { dateStyle:'full', timeZone:'Europe/Rome' }).format(new Date());\n\nfunction esc(s=''){ return String(s).replace(/</g,'&lt;').replace(/>/g,'&gt;'); }\n\nlet digest = `<b>AI Daily Digest</b> — ${esc(todayIT)}\\n`;\ndigest += `Mode: <code>${esc(mode)}</code> | run: <code>${esc(run_id)}</code>\\n\\n`;\nif (shortlist.length) {\n  digest += `<b>Shortlist (top topic):</b>\\n`;\n  shortlist.slice(0,5).forEach((s,i) => {\n    const title = esc(s.title || s);\n    const reason = s.reason ? ` — <i>${esc(s.reason)}</i>` : '';\n    digest += `${i+1}. ${title}${reason}\\n`;\n  });\n  digest += '\\n';\n} else {\n  digest += `<i>Nessun elemento in shortlist.</i>\\n\\n`;\n}\nif (mode === 'FALLBACK' || mode === 'HYBRID') {\n  digest += `ℹ️ Fallback attivo: uso editoriale evergreen/trend.\\n`;\n}\nif (mode === 'MONITOR_ONLY') {\n  digest += `⚠️ Giornata debole. Solo segnali monitorati, nessun pacchetto.\\n`;\n}\nif (mode === 'HARD_STOP') {\n  digest += `🛑 HARD_STOP — verifica i log.\\n`;\n}\nif (note) digest += `\\n${esc(note)}\\n`;\ndigest += `\\nSources: ${meta.sources_total||0} (failed ${meta.sources_failed||0}) · raw ${meta.raw_items_count||0} · deduped ${meta.deduped_count||0} · selected ${meta.selected_count||0}`;\n\n// Per-package messages\nfunction pkgText(p){\n  const ig = p.instagram || {};\n  const li = p.linkedin || {};\n  let t = '';\n  t += `<b>📦 ${esc(p.topic || p.title || 'Pacchetto')}</b>\\n`;\n  t += `Status: <code>${esc(p.status||'raw')}</code> · Confidence: <code>${esc(p.confidence_label||'n/a')}</code>\\n`;\n  if (p.recording_time_estimate) t += `Recording: ${esc(p.recording_time_estimate)}\\n`;\n  if (p.why_it_matters) t += `\\n<b>Perché conta:</b> ${esc(p.why_it_matters)}\\n`;\n  if (p.why_it_can_work) t += `<b>Perché può funzionare:</b> ${esc(p.why_it_can_work)}\\n`;\n  t += `\\n<b>🎬 Instagram</b>\\n`;\n  if (ig.hook)    t += `<b>Hook:</b> ${esc(ig.hook)}\\n`;\n  if (ig.script)  t += `<b>Script:</b>\\n${esc(ig.script)}\\n`;\n  if (ig.caption) t += `<b>Caption:</b> ${esc(ig.caption)}\\n`;\n  if (ig.cta)     t += `<b>CTA:</b> ${esc(ig.cta)}\\n`;\n  t += `\\n<b>💼 LinkedIn</b>\\n`;\n  if (li.post)          t += `${esc(li.post)}\\n`;\n  if (li.take_personal) t += `\\n<i>Take personale:</i> ${esc(li.take_personal)}\\n`;\n  if (p.source_name || p.source_url) {\n    t += `\\n<b>Fonte:</b> ${esc(p.source_name||'')} ${p.source_url?`— ${esc(p.source_url)}`:''}`;\n  }\n  return t;\n}\n\n// Split long messages (Telegram limit 4096)\nfunction chunk(s, n=3800){\n  const out=[]; let i=0; while (i<s.length){ out.push(s.slice(i,i+n)); i+=n; } return out;\n}\n\nconst messages = [];\nchunk(digest).forEach(t => messages.push({ kind:'digest', text: t }));\npackages.forEach((p, idx) => {\n  chunk(pkgText(p)).forEach(t => messages.push({ kind:'package', idx, text: t, content_id: p.content_id }));\n});\n\nreturn messages.map(m => ({ json: { ...m, run_id, mode, meta, started_at: input.started_at, packages_count: packages.length } }));"
+      },
+      "id": "build-msgs",
+      "name": "Build Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Config').first().json.telegramChatId }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "tg-send",
+      "name": "Telegram Send",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [720, 0],
+      "credentials": {
+        "telegramApi": {
+          "id": "LB71gUXSNc4EH9v1",
+          "name": "Content Bot Telegram"
+        }
+      },
+      "onError": "continueErrorOutput",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate delivery status across all sent messages and emit a single row\n// with column keys matching the run_logs schema (autoMap-friendly).\nconst items = $input.all();\nlet ok=0, fail=0;\nfor (const it of items){\n  if (it.json && it.json.error) fail++; else ok++;\n}\nconst first = items[0]?.json || {};\nconst status = fail === 0 ? 'delivered' : (ok > 0 ? 'partial' : 'delivery_failed');\nconst meta = first.meta || {};\nconst started_at = first.started_at || new Date().toISOString();\nconst ended_at = new Date().toISOString();\nreturn [{ json: {\n  run_id: first.run_id || 'unknown',\n  run_date: (new Date()).toISOString().slice(0,10),\n  mode: first.mode || 'UNKNOWN',\n  sources_total: meta.sources_total || 0,\n  sources_failed: meta.sources_failed || 0,\n  raw_items_count: meta.raw_items_count || 0,\n  deduped_count: meta.deduped_count || 0,\n  selected_count: meta.selected_count || 0,\n  telegram_status: status,\n  notes: `ok=${ok} fail=${fail} packages=${first.packages_count||0}`,\n  started_at,\n  ended_at\n}}];"
+      },
+      "id": "agg",
+      "name": "Aggregate Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 0]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yIzIep-XdRV7EVeWhjdpUps1PlF7tN6KymRjRgXGtuk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "run_logs",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "log-run",
+      "name": "Append run_logs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [1200, 0],
+      "credentials": {
+        "googleApi": {
+          "id": "VjDfIwHmyAdswLjT",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Executed By Workflow": { "main": [[{ "node": "Config", "type": "main", "index": 0 }]] },
+    "Config": { "main": [[{ "node": "Build Messages", "type": "main", "index": 0 }]] },
+    "Build Messages": { "main": [[{ "node": "Telegram Send", "type": "main", "index": 0 }]] },
+    "Telegram Send": { "main": [[{ "node": "Aggregate Status", "type": "main", "index": 0 }], [{ "node": "Aggregate Status", "type": "main", "index": 0 }]] },
+    "Aggregate Status": { "main": [[{ "node": "Append run_logs", "type": "main", "index": 0 }]] }
+  }
+}
