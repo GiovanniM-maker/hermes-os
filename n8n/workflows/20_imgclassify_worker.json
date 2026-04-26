@@ -99,7 +99,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Build the Gemini generateContent body (per item) with structured output + classification prompt.\nconst cfg = $('Config').first().json;\nconst inp = $json;\nif (inp._download_error) {\n  return { json: { ...inp, _skip_llm: true } };\n}\nconst prompt = `RUOLO\\nSei un sistema esperto nell'analisi di immagini di confezioni di cibo o bevande in contesto e-commerce.\\n\\nOBIETTIVO\\nDevi classificare l'orientamento della confezione nella foto scegliendo una sola tra queste categorie: frontale, Di 3 quarti verso sinistra, Di 3 quarti verso destra, posteriore, Dall'alto, Dal basso.\\n\\nDEFINIZIONI\\n- frontale: logo completamente visibile, centrato, lati assenti o minimi.\\n- Di 3 quarti verso sinistra: logo visibile ma non perfettamente centrato; parte laterale sinistra >= 15%.\\n- Di 3 quarti verso destra: come sopra ma lato destro.\\n- posteriore: logo non visibile, presenti informazioni nutrizionali / barcode / retro etichetta.\\n- Dall'alto: visibile tappo o apertura, superficie sotto, testi poco leggibili.\\n- Dal basso: visibile parte inferiore, oggetto puo sembrare sospeso.\\n\\nREGOLE\\n- Scegli una sola categoria, non inventare.\\n- Usa '3 quarti' solo se il lato e chiaramente visibile (>=15%); se minimo -> frontale.\\n- Logo centrato non distorto -> frontale.\\n- Logo non visibile -> posteriore.\\n- Angolo verticale evidente -> Dall'alto o Dal basso.\\n- In dubbio tra frontale e 3 quarti -> frontale.\\n\\nCONFIDENCE 0-100: 90-100 molto sicuro, 70-89 abbastanza sicuro, 50-69 incerto, <50 molto incerto.\\nNEEDS_HUMAN_REVIEW: true se confidence < 70, false se >= 70.`;\nconst body = {\n  contents: [{\n    parts: [\n      { inline_data: { mime_type: inp.imageMimeType, data: inp.imageBase64 } },\n      { text: prompt }\n    ]\n  }],\n  generationConfig: {\n    temperature: 0,\n    maxOutputTokens: 256,\n    responseMimeType: 'application/json',\n    responseJsonSchema: {\n      type: 'object',\n      properties: {\n        output:             { type: 'string', enum: ['frontale','Di 3 quarti verso sinistra','Di 3 quarti verso destra','posteriore',\"Dall'alto\",'Dal basso'] },\n        confidence:         { type: 'integer', minimum: 0, maximum: 100 },\n        needs_human_review: { type: 'boolean' }\n      },\n      required: ['output','confidence','needs_human_review']\n    }\n  }\n};\nreturn { json: { ...inp, _gemini_body: body, _model: cfg.geminiModel } };",
+        "jsCode": "// Build the Gemini generateContent body (per item) with structured output + 5-category prompt.\nconst cfg = $('Config').first().json;\nconst inp = $json;\nif (inp._download_error) {\n  return { json: { ...inp, _skip_llm: true } };\n}\nconst prompt = `Sei un classificatore esperto di immagini e-commerce alimentari di Eataly. Classifica ogni immagine in UNA SOLA delle 5 categorie qui sotto.\\n\\n1) FRONT\\n  - Prodotto confezionato visto FRONTALMENTE (logo centrato, lati assenti o trascurabili).\\n  - Vale anche se ci sono piccoli \\\"props\\\" alimentari accanto (fettina di pane vicino al vasetto di marmellata, qualche maccherone vicino al pacco di pasta).\\n  - Vale SEMPRE per BUNDLE e CESTI (set di piu prodotti come unico SKU), a prescindere dall'angolo di scatto.\\n\\n2) NUDO_PACK\\n  - Confezione + prodotto \\\"sfuso\\\" della STESSA SKU, visibili nella stessa immagine.\\n  - Esempi: uovo di Pasqua + scatola, parmigiano confezionato + cuneo di formaggio, panettone + scatola.\\n  - La confezione DEVE essere visibile insieme al prodotto sfuso.\\n\\n3) TOP\\n  - Prodotto confezionato visto DALL'ALTO (asse di scatto perpendicolare al piano).\\n  - Solo se l'angolo e chiaramente verticale; un'angolazione lieve = TREQUARTI o FRONT.\\n\\n4) TREQUARTI\\n  - Prodotto confezionato a 3/4: si vede chiaramente uno spigolo laterale (>=15% del lato).\\n  - Se il lato e appena accennato (<15%) -> FRONT, non TREQUARTI.\\n  - Bundle/cesti -> restano FRONT anche se scattati a tre quarti.\\n\\n5) SET\\n  - Prodotto NON confezionato, presentato su tagliere, piatto, coppa o ciotola.\\n  - Nessuna confezione visibile.\\n  - Vale anche per composite di piu prodotti diversi serviti insieme (es. cuneo di formaggio + crackers su tagliere).\\n\\nREGOLE\\n- Una sola categoria. Non inventare etichette.\\n- In dubbio FRONT vs TREQUARTI -> FRONT.\\n- In dubbio NUDO_PACK vs SET -> confezione visibile? NUDO_PACK; nessuna confezione? SET.\\n- Bundle/cesti = sempre FRONT.\\n\\nCONFIDENCE (0-100)\\n- 90-100: estremamente sicuro\\n- 70-89: sicuro\\n- 50-69: incerto\\n- <50: molto incerto\\n\\nNEEDS_HUMAN_REVIEW\\n- true se confidence < 70\\n- false se confidence >= 70\\n\\nOUTPUT: SOLO JSON valido, nessun testo extra.`;\nconst body = {\n  contents: [{\n    parts: [\n      { inline_data: { mime_type: inp.imageMimeType, data: inp.imageBase64 } },\n      { text: prompt }\n    ]\n  }],\n  generationConfig: {\n    temperature: 0,\n    maxOutputTokens: 256,\n    responseMimeType: 'application/json',\n    responseJsonSchema: {\n      type: 'object',\n      properties: {\n        output:             { type: 'string', enum: ['FRONT','NUDO_PACK','TOP','TREQUARTI','SET'] },\n        confidence:         { type: 'integer', minimum: 0, maximum: 100 },\n        needs_human_review: { type: 'boolean' }\n      },\n      required: ['output','confidence','needs_human_review']\n    }\n  }\n};\nreturn { json: { ...inp, _gemini_body: body, _model: cfg.geminiModel } };",
         "mode": "runOnceForEachItem"
       },
       "id": "build-prompt",
@@ -138,7 +138,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Per-item parser: emits exactly one row formatted for the sheet.\nfunction safeParse(s){\n  if (!s) return null;\n  let t = String(s).trim();\n  const m = t.match(/```(?:json)?\\s*([\\s\\S]*?)```/i);\n  if (m) t = m[1].trim();\n  try { return JSON.parse(t); } catch(e){}\n  const a=t.indexOf('{'),b=t.lastIndexOf('}');\n  if (a>=0&&b>a){ try{ return JSON.parse(t.slice(a,b+1)); }catch(e){} }\n  return null;\n}\nconst VALID = ['frontale','Di 3 quarti verso sinistra','Di 3 quarti verso destra','posteriore',\"Dall'alto\",'Dal basso'];\nconst inp = $json;\nlet orig = {};\ntry { orig = $('Fan Out Files').itemMatching($itemIndex).json || {}; } catch(e) { orig = {}; }\nconst id = orig.id || inp.id || '';\nconst name = orig.name || inp.name || '';\nconst run_id = orig.run_id || inp.run_id || '';\nconst shard_id = orig.shard_id || inp.shard_id || '';\nlet output = '', confidence = 0, needs_human_review = true, parsing_error = null;\nif (inp._download_error) {\n  output = 'ERRORE_DOWNLOAD'; parsing_error = inp._download_error;\n} else {\n  const respRoot = inp.candidates ? inp : (inp.body || {});\n  const choices = respRoot.candidates || [];\n  let rawText = '';\n  if (choices[0] && choices[0].content && choices[0].content.parts) {\n    rawText = (choices[0].content.parts.map(p => p.text || '').join(' ') || '').trim();\n  }\n  const parsed = safeParse(rawText);\n  if (parsed && typeof parsed === 'object') {\n    output = String(parsed.output ?? parsed.orientamento ?? '').trim();\n    confidence = Math.max(0, Math.min(100, Number(parsed.confidence ?? 0) || 0));\n    needs_human_review = (typeof parsed.needs_human_review === 'boolean') ? parsed.needs_human_review : (confidence < 70);\n    if (!VALID.includes(output)) {\n      parsing_error = `categoria_non_valida:${output}`;\n      output = 'ERRORE_VALIDAZIONE';\n      confidence = 0; needs_human_review = true;\n    }\n  } else {\n    parsing_error = 'json_malformato';\n    output = 'NON_DETERMINATO';\n  }\n}\nreturn { json: {\n  ID: id,\n  'Nome immagine': name,\n  Classificazione: output,\n  Confidence: confidence,\n  Cluster: needs_human_review ? 'review' : 'auto',\n  run_id, shard_id,\n  parsing_error\n}};"
+        "jsCode": "// Per-item parser: emits one row formatted for the sheet, with the destination\n// folder already resolved so the downstream Drive Move can use it directly.\nfunction safeParse(s){\n  if (!s) return null;\n  let t = String(s).trim();\n  const m = t.match(/```(?:json)?\\s*([\\s\\S]*?)```/i);\n  if (m) t = m[1].trim();\n  try { return JSON.parse(t); } catch(e){}\n  const a=t.indexOf('{'),b=t.lastIndexOf('}');\n  if (a>=0&&b>a){ try{ return JSON.parse(t.slice(a,b+1)); }catch(e){} }\n  return null;\n}\nconst VALID = ['FRONT','NUDO_PACK','TOP','TREQUARTI','SET'];\nconst FOLDERS = {\n  FRONT:        '15-oP9cJmzs5SQh0hyAhp1hTdi8ZDZBqR',\n  NUDO_PACK:    '1pF6VshXDBte386yzsyzdW4fYoDfDsYzH',\n  TOP:          '125a6QB5UJl22bozKWEQlyNDQaeDeL6K7',\n  TREQUARTI:    '1qIxk1bzfzLy-lB5XUUk_WSfOISPsvLoy',\n  SET:          '1CSIyBUbQe-aSzDUiJpnyh0KoZ17y0V0s',\n  HUMAN_REVIEW: '10WbxpW9feowuLZ9nTilLtlFjWnUNdso1',\n  FAILED:       '1cbAjxtdP1PmnAvprX9SdgMf5DvCd_wa2'\n};\nconst SOURCE_FOLDER = '1vUrxw22LWZkkeDwGNO1P4sc8FK3Z3v2g';\nconst inp = $json;\nlet orig = {};\ntry { orig = $('Fan Out Files').itemMatching($itemIndex).json || {}; } catch(e) { orig = {}; }\nconst id = orig.id || inp.id || '';\nconst name = orig.name || inp.name || '';\nconst run_id = orig.run_id || inp.run_id || '';\nconst shard_id = orig.shard_id || inp.shard_id || '';\nlet output = '', confidence = 0, needs_human_review = true, parsing_error = null;\nif (inp._download_error) {\n  output = 'ERRORE_DOWNLOAD'; parsing_error = inp._download_error;\n} else {\n  const respRoot = inp.candidates ? inp : (inp.body || {});\n  const choices = respRoot.candidates || [];\n  let rawText = '';\n  if (choices[0] && choices[0].content && choices[0].content.parts) {\n    rawText = (choices[0].content.parts.map(p => p.text || '').join(' ') || '').trim();\n  }\n  const parsed = safeParse(rawText);\n  if (parsed && typeof parsed === 'object') {\n    output = String(parsed.output ?? '').trim().toUpperCase().replace(/ /g,'_');\n    confidence = Math.max(0, Math.min(100, Number(parsed.confidence ?? 0) || 0));\n    needs_human_review = (typeof parsed.needs_human_review === 'boolean') ? parsed.needs_human_review : (confidence < 70);\n    if (!VALID.includes(output)) {\n      parsing_error = `categoria_non_valida:${output}`;\n      output = 'ERRORE_VALIDAZIONE';\n      confidence = 0; needs_human_review = true;\n    }\n  } else {\n    parsing_error = 'json_malformato';\n    output = 'NON_DETERMINATO';\n  }\n}\n// Decide where to move the file\nconst isFailure = parsing_error || ['ERRORE_DOWNLOAD','ERRORE_VALIDAZIONE','NON_DETERMINATO'].includes(output);\nlet dest_folder_id, cluster;\nif (isFailure) { dest_folder_id = FOLDERS.FAILED; cluster = 'failed'; }\nelse if (confidence < 70) { dest_folder_id = FOLDERS.HUMAN_REVIEW; cluster = 'review'; }\nelse { dest_folder_id = FOLDERS[output] || FOLDERS.FAILED; cluster = 'auto'; }\nreturn { json: {\n  ID: id,\n  'Nome immagine': name,\n  Classificazione: output,\n  Confidence: confidence,\n  Cluster: cluster,\n  dest_folder_id,\n  source_folder_id: SOURCE_FOLDER,\n  run_id, shard_id,\n  parsing_error\n}};"
       },
       "id": "parse",
       "name": "Parse Result",
@@ -182,6 +182,41 @@
       "maxTries": 3,
       "waitBetweenTries": 2000,
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.ID }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "addParents",    "value": "={{ $json.dest_folder_id }}" },
+            { "name": "removeParents", "value": "={{ $json.source_folder_id }}" },
+            { "name": "supportsAllDrives", "value": "true" },
+            { "name": "fields",        "value": "id,parents" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "move",
+      "name": "Drive Move",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2400, 120],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "ZVxONwG8Bv78yQ5L", "name": "Google Drive account" }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -194,6 +229,7 @@
     "Build Gemini Body":{ "main": [[{ "node": "Gemini Classify", "type": "main", "index": 0 }]] },
     "Gemini Classify":  { "main": [[{ "node": "Parse Result", "type": "main", "index": 0 }]] },
     "Parse Result":     { "main": [[{ "node": "Batch Append", "type": "main", "index": 0 }]] },
-    "Batch Append":     { "main": [[{ "node": "Batch Loop", "type": "main", "index": 0 }]] }
+    "Batch Append":     { "main": [[{ "node": "Drive Move", "type": "main", "index": 0 }]] },
+    "Drive Move":       { "main": [[{ "node": "Batch Loop", "type": "main", "index": 0 }]] }
   }
 }
